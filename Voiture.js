@@ -104,6 +104,7 @@ try {
         // Production: use same host without specifying port
         // Render will handle the port automatically (443 for wss)
         wsUrl = `${proto}://${window.location.hostname}`;
+    }
     
     socket = new WebSocket(wsUrl);
 
