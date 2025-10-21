@@ -95,7 +95,7 @@ function getRandomSpawnPosition() {
 try {
     const proto = window.location.protocol === 'https:' ? 'wss' : 'ws';
     
-    // Fix: Don't add port in production, use the current origin
+    // Fix: Don't add port in production, use the current origi
     let wsUrl;
     if (window.location.hostname === 'localhost') {
         // Development: connect to local server on port 3000
