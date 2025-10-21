@@ -94,8 +94,17 @@ function getRandomSpawnPosition() {
 
 try {
     const proto = window.location.protocol === 'https:' ? 'wss' : 'ws';
-    // connect to same host on port 3000 by default
-    const wsUrl = `${proto}://${window.location.hostname}:${window.location.port || 3000}`;
+    
+    // Fix: Don't add port in production, use the current origin
+    let wsUrl;
+    if (window.location.hostname === 'localhost') {
+        // Development: connect to local server on port 3000
+        wsUrl = `${proto}://localhost:3000`;
+    } else {
+        // Production: use same host without specifying port
+        // Render will handle the port automatically (443 for wss)
+        wsUrl = `${proto}://${window.location.hostname}`;
+    
     socket = new WebSocket(wsUrl);
 
     socket.addEventListener('open', () => {
