@@ -1,0 +1,5 @@
+# Ignorer le dossier EXERCICE (tout contenu)
+EXERCICE/
+
+# Ignorer node_modules (dossier classique de Node.js)
+node_modules/

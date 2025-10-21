@@ -1,0 +1,48 @@
+/* Global reset and prevent scrolling */
+html, body {
+  height: 100%;
+  margin: 0;
+  padding: 0;
+  overflow: hidden; /* no scrollbars */
+}
+
+/* Ensure any container doesn't exceed viewport */
+#container {
+  width: 100vw;
+  height: 100vh;
+  position: fixed;
+  left: 0;
+  top: 0;
+  pointer-events: none; /* allow canvas interactions on top */
+}
+
+/* WebGL canvas full screen and on top of the DOM */
+.webgl {
+  position: fixed;
+  left: 0;
+  top: 0;
+  width: 100vw;
+  height: 100vh;
+  display: block;
+}
+
+/* HUD styles (if present) should be positioned and not enlarge the page */
+.hud {
+  position: fixed;
+  right: 12px;
+  top: 12px;
+  background: rgba(0,0,0,0.6);
+  color: #fff;
+  padding: 8px 10px;
+  font-family: monospace;
+  z-index: 1000;
+  pointer-events: auto;
+}
+
+.hud .row { display:flex; gap:8px; align-items:center; margin-bottom:6px; }
+.hud .gauge { width: 120px; height: 10px; background: rgba(255,255,255,0.12); border-radius: 4px; overflow: hidden; }
+.hud .gauge-fill { width: 100%; height: 100%; background: linear-gradient(90deg,#ff8c00,#ffd27a); transform-origin: left center; transform: scaleX(1); }
+.hud .title { font-weight: bold; margin-bottom:6px; }
+
+/* make sure helper elements don't cause scroll */
+* { box-sizing: border-box; }
