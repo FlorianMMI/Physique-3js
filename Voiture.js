@@ -631,15 +631,27 @@ const debugGroup = new THREE.Group();
 scene.add(debugGroup);
 const debugArrows = [];
 
-// Rich HUD panel
+// Rich HUD panel - Amélioré
 const hud = document.createElement('div');
 hud.className = 'hud';
 hud.innerHTML = `
-        <div class="title">Physique 3JS</div>
-        <div class="row"><div>Vies</div><div id="hud-lives" style="color: #ff3333; font-weight: bold;">❤️ ❤️ ❤️</div></div>
-        <div class="row"><div>particles</div><div id="hud-particles">0</div></div>
-        <div class="row"><div>avg Vy</div><div id="hud-vy">0.00</div></div>
-        <div class="row"><div>Boost</div><div id="hud-boost"><div class="gauge"><div class="gauge-fill" id="hud-boost-fill"></div></div></div></div>
+        <div class="title">🏎️ BATTLE ROYALE</div>
+        <div class="row">
+            <div>Vies</div>
+            <div id="hud-lives" style="color: #ff3333; font-weight: bold; font-size: 18px;">❤️ ❤️ ❤️</div>
+        </div>
+        <div class="row">
+            <div>Boost</div>
+            <div id="hud-boost" style="flex: 1;">
+                <div class="gauge">
+                    <div class="gauge-fill" id="hud-boost-fill"></div>
+                </div>
+            </div>
+        </div>
+        <div class="row" style="opacity: 0.6; font-size: 12px;">
+            <div>Particules</div>
+            <div id="hud-particles">0</div>
+        </div>
     <!-- GUI removed -->
 `;
 document.body.appendChild(hud);
@@ -736,6 +748,9 @@ function checkFallOffPlatform() {
         car.lives = Math.max(0, car.lives - 1);
         notifyLivesChange(car.lives);
         
+        // Afficher notification de perte de vie
+        showLifeLostNotification();
+        
         if (car.lives > 0) {
             // Respawn sur la plateforme
             const spawn = getRandomSpawnPosition();
@@ -816,23 +831,15 @@ function enterSpectatorMode() {
     controls.target.set(0, 0, 0);
     controls.update();
     
-    // Afficher message
+    // Afficher message amélioré
     const spectatorDiv = document.createElement('div');
     spectatorDiv.id = 'spectator-message';
-    spectatorDiv.style.position = 'fixed';
-    spectatorDiv.style.top = '20px';
-    spectatorDiv.style.left = '50%';
-    spectatorDiv.style.transform = 'translateX(-50%)';
-    spectatorDiv.style.padding = '20px 40px';
-    spectatorDiv.style.backgroundColor = 'rgba(0, 0, 0, 0.8)';
-    spectatorDiv.style.color = '#ffffff';
-    spectatorDiv.style.fontSize = '24px';
-    spectatorDiv.style.fontWeight = 'bold';
-    spectatorDiv.style.borderRadius = '10px';
-    spectatorDiv.style.border = '2px solid #ffffff';
-    spectatorDiv.style.zIndex = '10000';
-    spectatorDiv.style.textAlign = 'center';
-    spectatorDiv.innerHTML = '☠️ MODE SPECTATEUR ☠️<br><span style="font-size: 16px;">En attente de la fin du round...</span>';
+    spectatorDiv.className = 'spectator-banner';
+    spectatorDiv.innerHTML = `
+        <div class="spectator-icon">👻</div>
+        <div class="spectator-text">MODE SPECTATEUR</div>
+        <div class="spectator-subtext">En attente de la fin du round...</div>
+    `;
     document.body.appendChild(spectatorDiv);
 }
 
@@ -840,63 +847,56 @@ function enterSpectatorMode() {
 function showVictoryMessage() {
     const victoryDiv = document.createElement('div');
     victoryDiv.id = 'game-message';
-    victoryDiv.style.position = 'fixed';
-    victoryDiv.style.top = '50%';
-    victoryDiv.style.left = '50%';
-    victoryDiv.style.transform = 'translate(-50%, -50%)';
-    victoryDiv.style.padding = '40px 60px';
-    victoryDiv.style.backgroundColor = 'rgba(0, 200, 0, 0.9)';
-    victoryDiv.style.color = '#ffffff';
-    victoryDiv.style.fontSize = '48px';
-    victoryDiv.style.fontWeight = 'bold';
-    victoryDiv.style.borderRadius = '10px';
-    victoryDiv.style.border = '3px solid #ffffff';
-    victoryDiv.style.zIndex = '10001';
-    victoryDiv.style.textAlign = 'center';
-    victoryDiv.innerHTML = '🏆 VICTOIRE! 🏆<br><span style="font-size: 24px;">Rechargez la page pour rejouer (F5)</span>';
+    victoryDiv.className = 'game-message victory';
+    victoryDiv.innerHTML = `
+        <div class="game-message-icon">🏆</div>
+        <div class="game-message-title">VICTOIRE!</div>
+        <div class="game-message-subtitle">${gameState.isHost ? 'Cliquez sur "Nouvelle Partie" pour rejouer' : 'L\'hôte peut lancer une nouvelle partie'}</div>
+    `;
     document.body.appendChild(victoryDiv);
+    
+    // Animation d'apparition
+    setTimeout(() => {
+        victoryDiv.classList.add('show');
+    }, 10);
 }
 
 // Afficher message de défaite
 function showDefeatMessage(winnerId) {
     const defeatDiv = document.createElement('div');
     defeatDiv.id = 'game-message';
-    defeatDiv.style.position = 'fixed';
-    defeatDiv.style.top = '50%';
-    defeatDiv.style.left = '50%';
-    defeatDiv.style.transform = 'translate(-50%, -50%)';
-    defeatDiv.style.padding = '40px 60px';
-    defeatDiv.style.backgroundColor = 'rgba(200, 0, 0, 0.9)';
-    defeatDiv.style.color = '#ffffff';
-    defeatDiv.style.fontSize = '48px';
-    defeatDiv.style.fontWeight = 'bold';
-    defeatDiv.style.borderRadius = '10px';
-    defeatDiv.style.border = '3px solid #ffffff';
-    defeatDiv.style.zIndex = '10001';
-    defeatDiv.style.textAlign = 'center';
-    defeatDiv.innerHTML = `DÉFAITE<br><span style="font-size: 24px;">Joueur ${winnerId} a gagné!<br>Rechargez la page pour rejouer (F5)</span>`;
+    defeatDiv.className = 'game-message defeat';
+    defeatDiv.innerHTML = `
+        <div class="game-message-icon">💀</div>
+        <div class="game-message-title">DÉFAITE</div>
+        <div class="game-message-subtitle">Joueur ${winnerId} a gagné!</div>
+        <div class="game-message-info">${gameState.isHost ? 'Cliquez sur "Nouvelle Partie" pour rejouer' : 'L\'hôte peut lancer une nouvelle partie'}</div>
+    `;
     document.body.appendChild(defeatDiv);
+    
+    // Animation d'apparition
+    setTimeout(() => {
+        defeatDiv.classList.add('show');
+    }, 10);
 }
 
 // Afficher message d'égalité
 function showDrawMessage() {
     const drawDiv = document.createElement('div');
     drawDiv.id = 'game-message';
-    drawDiv.style.position = 'fixed';
-    drawDiv.style.top = '50%';
-    drawDiv.style.left = '50%';
-    drawDiv.style.transform = 'translate(-50%, -50%)';
-    drawDiv.style.padding = '40px 60px';
-    drawDiv.style.backgroundColor = 'rgba(100, 100, 100, 0.9)';
-    drawDiv.style.color = '#ffffff';
-    drawDiv.style.fontSize = '48px';
-    drawDiv.style.fontWeight = 'bold';
-    drawDiv.style.borderRadius = '10px';
-    drawDiv.style.border = '3px solid #ffffff';
-    drawDiv.style.zIndex = '10001';
-    drawDiv.style.textAlign = 'center';
-    drawDiv.innerHTML = `ÉGALITÉ!<br><span style="font-size: 24px;">Tous les joueurs sont tombés!<br>${gameState.isHost ? 'Cliquez sur "Nouvelle Partie" en bas' : 'L\'hôte peut relancer'}</span>`;
+    drawDiv.className = 'game-message draw';
+    drawDiv.innerHTML = `
+        <div class="game-message-icon">🤝</div>
+        <div class="game-message-title">ÉGALITÉ!</div>
+        <div class="game-message-subtitle">Tous les joueurs sont tombés!</div>
+        <div class="game-message-info">${gameState.isHost ? 'Cliquez sur "Nouvelle Partie" pour rejouer' : 'L\'hôte peut lancer une nouvelle partie'}</div>
+    `;
     document.body.appendChild(drawDiv);
+    
+    // Animation d'apparition
+    setTimeout(() => {
+        drawDiv.classList.add('show');
+    }, 10);
 }
 
 // Afficher contrôles de l'hôte
@@ -904,41 +904,94 @@ function showHostControls() {
     const controls = document.createElement('div');
     controls.id = 'host-controls';
     controls.style.position = 'fixed';
-    controls.style.bottom = '20px';
-    controls.style.left = '50%';
+    controls.style.top = '20px';
+    controls.style.left = '10%';
     controls.style.transform = 'translateX(-50%)';
     controls.style.padding = '15px 30px';
-    controls.style.backgroundColor = 'rgba(0, 0, 0, 0.8)';
+    controls.style.backgroundColor = 'rgba(0, 0, 0, 0.85)';
     controls.style.color = '#ffffff';
     controls.style.fontSize = '18px';
     controls.style.fontWeight = 'bold';
-    controls.style.borderRadius = '10px';
-    controls.style.border = '2px solid #00ff00';
+    controls.style.borderRadius = '12px';
+    controls.style.border = '3px solid #00ff00';
+    controls.style.boxShadow = '0 0 20px rgba(0, 255, 0, 0.3)';
     controls.style.zIndex = '10000';
     controls.style.textAlign = 'center';
     
     if (!gameState.isGameActive) {
         controls.innerHTML = `
             🎮 <span style="color: #00ff00;">VOUS ÊTES L'HÔTE</span><br>
-            <button id="start-game-btn" style="margin-top: 10px; padding: 10px 20px; font-size: 16px; cursor: pointer; background: #00ff00; border: none; border-radius: 5px; font-weight: bold;">
+            <button id="start-game-btn" class="host-btn primary">
                 🚀 DÉMARRER LA PARTIE
             </button>
         `;
     } else {
         controls.innerHTML = `
             🎮 <span style="color: #00ff00;">VOUS ÊTES L'HÔTE</span><br>
-            <span style="font-size: 14px;">Partie en cours...</span>
+            <div style="display: flex; gap: 10px; margin-top: 10px; justify-content: center;">
+                <button id="reset-game-btn" class="host-btn warning">
+                    🔄 RÉINITIALISER
+                </button>
+            </div>
         `;
     }
     
     document.body.appendChild(controls);
     
-    // Event listener pour le bouton
+    // Event listener pour le bouton de démarrage
     const startBtn = document.getElementById('start-game-btn');
     if (startBtn) {
         startBtn.addEventListener('click', () => {
             if (socket && socket.readyState === WebSocket.OPEN) {
                 socket.send(JSON.stringify({ type: 'start_game' }));
+            }
+        });
+    }
+    
+    // Event listener pour le bouton de réinitialisation
+    const resetBtn = document.getElementById('reset-game-btn');
+    if (resetBtn) {
+        resetBtn.addEventListener('click', () => {
+            if (socket && socket.readyState === WebSocket.OPEN) {
+                // Demander confirmation
+                if (confirm('Êtes-vous sûr de vouloir réinitialiser la partie ?')) {
+                    // Marquer localement la partie comme inactive et réinitialiser l'état
+                    gameState.isGameActive = false;
+                    gameState.winnerId = null;
+                    gameState.canPlay = true;
+
+                    // Réinitialiser le joueur local
+                    car.lives = car.maxLives;
+                    car.isDead = false;
+                    car.speed = 0;
+                    const spawn = getRandomSpawnPosition();
+                    if (car.mesh) {
+                        car.mesh.position.set(spawn.x, spawn.y, spawn.z);
+                        car.mesh.rotation.y = spawn.rotY;
+                    }
+
+                    // Réinitialiser les joueurs distants
+                    players.forEach((p) => {
+                        p.lives = 3;
+                        p.isDead = false;
+                    });
+
+                    // Réactiver le suivi de caméra et nettoyer l'UI locale
+                    cameraFollow.enabled = true;
+                    const existingMsg = document.getElementById('game-message');
+                    if (existingMsg) existingMsg.remove();
+                    const spectatorMsg = document.getElementById('spectator-message');
+                    if (spectatorMsg) spectatorMsg.remove();
+
+                    // Notifier le serveur pour réinitialiser la partie (si possible)
+                    if (socket && socket.readyState === WebSocket.OPEN) {
+                        socket.send(JSON.stringify({ type: 'start_game' }));
+                    }
+
+                    // Mettre à jour l'affichage local
+                    updateLivesDisplay();
+                    updateHostControls();
+                }
             }
         });
     }
@@ -951,7 +1004,7 @@ function updateHostControls() {
         if (!gameState.isGameActive) {
             controls.innerHTML = `
                 🎮 <span style="color: #00ff00;">VOUS ÊTES L'HÔTE</span><br>
-                <button id="start-game-btn" style="margin-top: 10px; padding: 10px 20px; font-size: 16px; cursor: pointer; background: #00ff00; border: none; border-radius: 5px; font-weight: bold;">
+                <button id="start-game-btn" class="host-btn primary">
                     🔄 NOUVELLE PARTIE
                 </button>
             `;
@@ -966,8 +1019,22 @@ function updateHostControls() {
         } else {
             controls.innerHTML = `
                 🎮 <span style="color: #00ff00;">VOUS ÊTES L'HÔTE</span><br>
-                <span style="font-size: 14px;">Partie en cours...</span>
+                <div style="display: flex; gap: 10px; margin-top: 10px; justify-content: center;">
+                    <button id="reset-game-btn" class="host-btn warning">
+                        🔄 RÉINITIALISER
+                    </button>
+                </div>
             `;
+            const resetBtn = document.getElementById('reset-game-btn');
+            if (resetBtn) {
+                resetBtn.addEventListener('click', () => {
+                    if (socket && socket.readyState === WebSocket.OPEN) {
+                        if (confirm('Êtes-vous sûr de vouloir réinitialiser la partie ?')) {
+                            socket.send(JSON.stringify({ type: 'start_game' }));
+                        }
+                    }
+                });
+            }
         }
     }
 }
@@ -979,6 +1046,57 @@ function updateLivesDisplay() {
         const emptyHearts = '🖤 '.repeat(Math.max(0, car.maxLives - car.lives));
         hudLives.innerHTML = hearts + emptyHearts;
     }
+}
+
+// Afficher notification de perte de vie
+function showLifeLostNotification() {
+    const notification = document.createElement('div');
+    notification.className = 'life-lost-notification';
+    notification.innerHTML = `
+        <div class="notification-icon">💔</div>
+        <div class="notification-text">VIE PERDUE!</div>
+        <div class="notification-subtext">${car.lives} ${car.lives > 1 ? 'vies restantes' : 'vie restante'}</div>
+    `;
+    document.body.appendChild(notification);
+    
+    // Animer l'apparition
+    setTimeout(() => {
+        notification.classList.add('show');
+    }, 10);
+    
+    // Supprimer après animation
+    setTimeout(() => {
+        notification.classList.remove('show');
+        setTimeout(() => {
+            notification.remove();
+        }, 500);
+    }, 2000);
+    
+    // Effet de secousse de caméra
+    shakeCameraEffect();
+}
+
+// Effet de secousse de caméra
+function shakeCameraEffect() {
+    const originalPos = camera.position.clone();
+    const shakeIntensity = 0.5;
+    const shakeDuration = 500; // ms
+    const startTime = performance.now();
+    
+    function shake() {
+        const elapsed = performance.now() - startTime;
+        if (elapsed < shakeDuration) {
+            const progress = elapsed / shakeDuration;
+            const intensity = shakeIntensity * (1 - progress); // Diminue avec le temps
+            camera.position.x = originalPos.x + (Math.random() - 0.5) * intensity;
+            camera.position.y = originalPos.y + (Math.random() - 0.5) * intensity;
+            camera.position.z = originalPos.z + (Math.random() - 0.5) * intensity;
+            requestAnimationFrame(shake);
+        } else {
+            camera.position.copy(originalPos);
+        }
+    }
+    shake();
 }
 
 function emitParticle() {

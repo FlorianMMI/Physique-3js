@@ -4,6 +4,7 @@ html, body {
   margin: 0;
   padding: 0;
   overflow: hidden; /* no scrollbars */
+  font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
 }
 
 /* Ensure any container doesn't exceed viewport */
@@ -26,23 +27,298 @@ html, body {
   display: block;
 }
 
-/* HUD styles (if present) should be positioned and not enlarge the page */
+/* HUD styles - Amélioré */
 .hud {
   position: fixed;
-  right: 12px;
-  top: 12px;
-  background: rgba(0,0,0,0.6);
+  right: 20px;
+  top: 20px;
+  background: linear-gradient(135deg, rgba(0,0,0,0.85) 0%, rgba(20,20,20,0.9) 100%);
   color: #fff;
-  padding: 8px 10px;
-  font-family: monospace;
+  padding: 16px 20px;
+  font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
   z-index: 1000;
   pointer-events: auto;
+  border-radius: 12px;
+  border: 2px solid rgba(255,255,255,0.1);
+  box-shadow: 0 8px 32px rgba(0,0,0,0.4);
+  backdrop-filter: blur(10px);
+  min-width: 200px;
 }
 
-.hud .row { display:flex; gap:8px; align-items:center; margin-bottom:6px; }
-.hud .gauge { width: 120px; height: 10px; background: rgba(255,255,255,0.12); border-radius: 4px; overflow: hidden; }
-.hud .gauge-fill { width: 100%; height: 100%; background: linear-gradient(90deg,#ff8c00,#ffd27a); transform-origin: left center; transform: scaleX(1); }
-.hud .title { font-weight: bold; margin-bottom:6px; }
+.hud .title { 
+  font-weight: bold; 
+  margin-bottom: 12px;
+  font-size: 18px;
+  color: #00ff00;
+  text-shadow: 0 0 10px rgba(0,255,0,0.5);
+  letter-spacing: 1px;
+}
+
+.hud .row { 
+  display: flex; 
+  gap: 12px; 
+  align-items: center; 
+  margin-bottom: 10px;
+  font-size: 14px;
+}
+
+.hud .row > div:first-child {
+  min-width: 80px;
+  font-weight: 500;
+  color: rgba(255,255,255,0.7);
+}
+
+.hud .gauge { 
+  width: 140px; 
+  height: 12px; 
+  background: rgba(255,255,255,0.15); 
+  border-radius: 6px; 
+  overflow: hidden;
+  border: 1px solid rgba(255,255,255,0.2);
+  box-shadow: inset 0 2px 4px rgba(0,0,0,0.3);
+}
+
+.hud .gauge-fill { 
+  width: 100%; 
+  height: 100%; 
+  background: linear-gradient(90deg, #ff8c00 0%, #ffb347 50%, #ffd27a 100%); 
+  transform-origin: left center; 
+  transform: scaleX(1);
+  transition: transform 0.3s ease;
+  box-shadow: 0 0 8px rgba(255,140,0,0.6);
+}
+
+/* Boutons hôte - Améliorés */
+.host-btn {
+  margin-top: 10px;
+  padding: 12px 24px;
+  font-size: 16px;
+  cursor: pointer;
+  border: none;
+  border-radius: 8px;
+  font-weight: bold;
+  transition: all 0.3s ease;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+  text-transform: uppercase;
+  letter-spacing: 1px;
+}
+
+.host-btn.primary {
+  background: linear-gradient(135deg, #00ff00 0%, #00cc00 100%);
+  color: #000;
+}
+
+.host-btn.primary:hover {
+  background: linear-gradient(135deg, #00ff33 0%, #00dd00 100%);
+  transform: translateY(-2px);
+  box-shadow: 0 6px 16px rgba(0,255,0,0.4);
+}
+
+.host-btn.warning {
+  background: linear-gradient(135deg, #ff9500 0%, #ff6600 100%);
+  color: #fff;
+}
+
+.host-btn.warning:hover {
+  background: linear-gradient(135deg, #ffaa00 0%, #ff7700 100%);
+  transform: translateY(-2px);
+  box-shadow: 0 6px 16px rgba(255,149,0,0.4);
+}
+
+.host-btn:active {
+  transform: translateY(0px);
+  box-shadow: 0 2px 8px rgba(0,0,0,0.3);
+}
+
+/* Notification de perte de vie */
+.life-lost-notification {
+  position: fixed;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%) scale(0.5);
+  background: linear-gradient(135deg, rgba(255,0,0,0.95) 0%, rgba(180,0,0,0.95) 100%);
+  color: white;
+  padding: 30px 50px;
+  border-radius: 20px;
+  border: 4px solid rgba(255,255,255,0.3);
+  box-shadow: 0 0 40px rgba(255,0,0,0.6), inset 0 0 20px rgba(0,0,0,0.3);
+  z-index: 10002;
+  text-align: center;
+  opacity: 0;
+  transition: all 0.5s cubic-bezier(0.68, -0.55, 0.265, 1.55);
+  pointer-events: none;
+}
+
+.life-lost-notification.show {
+  opacity: 1;
+  transform: translate(-50%, -50%) scale(1);
+}
+
+.notification-icon {
+  font-size: 64px;
+  margin-bottom: 10px;
+  animation: pulse 0.5s ease-in-out;
+}
+
+.notification-text {
+  font-size: 36px;
+  font-weight: bold;
+  text-shadow: 0 0 20px rgba(0,0,0,0.5);
+  margin-bottom: 8px;
+  letter-spacing: 2px;
+}
+
+.notification-subtext {
+  font-size: 20px;
+  font-weight: 500;
+  opacity: 0.9;
+}
+
+@keyframes pulse {
+  0%, 100% {
+    transform: scale(1);
+  }
+  50% {
+    transform: scale(1.2);
+  }
+}
+
+/* Messages de jeu (Victoire/Défaite/Égalité) */
+.game-message {
+  position: fixed;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%) scale(0.5);
+  padding: 50px 80px;
+  border-radius: 20px;
+  border: 4px solid rgba(255,255,255,0.3);
+  box-shadow: 0 0 60px rgba(0,0,0,0.8), inset 0 0 30px rgba(0,0,0,0.3);
+  z-index: 10001;
+  text-align: center;
+  opacity: 0;
+  transition: all 0.6s cubic-bezier(0.68, -0.55, 0.265, 1.55);
+  backdrop-filter: blur(10px);
+  min-width: 500px;
+}
+
+.game-message.show {
+  opacity: 1;
+  transform: translate(-50%, -50%) scale(1);
+}
+
+.game-message.victory {
+  background: linear-gradient(135deg, rgba(0,200,0,0.95) 0%, rgba(0,150,0,0.95) 100%);
+  border-color: rgba(0,255,0,0.5);
+  box-shadow: 0 0 60px rgba(0,255,0,0.6), inset 0 0 30px rgba(0,0,0,0.3);
+}
+
+.game-message.defeat {
+  background: linear-gradient(135deg, rgba(200,0,0,0.95) 0%, rgba(150,0,0,0.95) 100%);
+  border-color: rgba(255,0,0,0.5);
+  box-shadow: 0 0 60px rgba(255,0,0,0.6), inset 0 0 30px rgba(0,0,0,0.3);
+}
+
+.game-message.draw {
+  background: linear-gradient(135deg, rgba(100,100,100,0.95) 0%, rgba(70,70,70,0.95) 100%);
+  border-color: rgba(255,255,255,0.3);
+  box-shadow: 0 0 60px rgba(150,150,150,0.6), inset 0 0 30px rgba(0,0,0,0.3);
+}
+
+.game-message-icon {
+  font-size: 80px;
+  margin-bottom: 20px;
+  animation: bounce 1s ease-in-out infinite;
+}
+
+@keyframes bounce {
+  0%, 100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-20px);
+  }
+}
+
+.game-message-title {
+  font-size: 52px;
+  font-weight: bold;
+  color: white;
+  text-shadow: 0 0 30px rgba(0,0,0,0.8);
+  margin-bottom: 15px;
+  letter-spacing: 3px;
+}
+
+.game-message-subtitle {
+  font-size: 24px;
+  font-weight: 500;
+  color: rgba(255,255,255,0.95);
+  margin-bottom: 10px;
+}
+
+.game-message-info {
+  font-size: 18px;
+  color: rgba(255,255,255,0.8);
+  font-weight: 400;
+  margin-top: 20px;
+}
+
+/* Message spectateur amélioré */
+.spectator-banner {
+  position: fixed;
+  top: 20px;
+  left: 50%;
+  transform: translateX(-50%);
+  padding: 20px 50px;
+  background: linear-gradient(135deg, rgba(80,0,120,0.9) 0%, rgba(50,0,80,0.9) 100%);
+  color: #ffffff;
+  border-radius: 15px;
+  border: 3px solid rgba(200,100,255,0.5);
+  box-shadow: 0 0 30px rgba(150,50,200,0.5), inset 0 0 20px rgba(0,0,0,0.3);
+  z-index: 10000;
+  text-align: center;
+  animation: fadeInSlide 0.5s ease-in-out;
+  backdrop-filter: blur(10px);
+}
+
+.spectator-icon {
+  font-size: 48px;
+  margin-bottom: 8px;
+  animation: float 2s ease-in-out infinite;
+}
+
+@keyframes float {
+  0%, 100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-10px);
+  }
+}
+
+.spectator-text {
+  font-size: 28px;
+  font-weight: bold;
+  text-shadow: 0 0 20px rgba(200,100,255,0.8);
+  margin-bottom: 5px;
+  letter-spacing: 2px;
+}
+
+.spectator-subtext {
+  font-size: 16px;
+  opacity: 0.9;
+  font-weight: 500;
+}
+
+@keyframes fadeInSlide {
+  from {
+    opacity: 0;
+    transform: translateX(-50%) translateY(-20px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(-50%) translateY(0);
+  }
+}
 
 /* make sure helper elements don't cause scroll */
 * { box-sizing: border-box; }
