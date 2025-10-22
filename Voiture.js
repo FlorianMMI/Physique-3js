@@ -3,12 +3,64 @@ import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 
 
+// === Modal pour demander le pseudo ===
+let playerName = null;
+let playerColor = null;
+
+function showNameModal() {
+    return new Promise((resolve) => {
+        const modal = document.createElement('div');
+        modal.className = 'name-modal';
+        modal.innerHTML = `
+            <div class="name-modal-content">
+                <h2>🏎️ BATTLE ROYALE 3D</h2>
+                <p>Entrez votre pseudo</p>
+                <input type="text" id="player-name-input" maxlength="15" placeholder="Votre pseudo...">
+                <button id="join-btn" class="host-btn primary">REJOINDRE</button>
+            </div>
+        `;
+        document.body.appendChild(modal);
+        
+        const input = document.getElementById('player-name-input');
+        const btn = document.getElementById('join-btn');
+        
+        input.focus();
+        
+        const submit = () => {
+            const name = input.value.trim();
+            if (name.length > 0) {
+                playerName = name;
+                modal.remove();
+                resolve(name);
+            } else {
+                input.style.borderColor = '#ff0000';
+                setTimeout(() => { input.style.borderColor = ''; }, 500);
+            }
+        };
+        
+        btn.addEventListener('click', submit);
+        input.addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') submit();
+        });
+    });
+}
+
+// Générer couleur persistante basée sur un seed (le pseudo)
+function generateColorFromSeed(seed) {
+    let hash = 0;
+    for (let i = 0; i < seed.length; i++) {
+        hash = seed.charCodeAt(i) + ((hash << 5) - hash);
+    }
+    const hue = Math.abs(hash % 360) / 360;
+    return new THREE.Color().setHSL(hue, 0.8, 0.5);
+}
+
 // Scene setup
 const scene = new THREE.Scene();
 scene.background = new THREE.Color(0x87ceeb); // Ciel bleu
 
-// Créer une plateforme circulaire plus grande
-const platformRadius = 40;
+// Créer une plateforme circulaire
+const platformRadius = 40; // Taille réduite pour plus de challenge
 const platformGeometry = new THREE.CylinderGeometry(platformRadius, platformRadius, 2, 32);
 const platformMaterial = new THREE.MeshStandardMaterial({ 
     color: 0x4a4a4a,
@@ -68,7 +120,7 @@ const cameraFollow = {
 const particles = [];
 
 // --- Multiplayer networking avec interpolation améliorée ---
-const players = new Map(); // id -> { mesh, targetPos, targetRot, velocity, lives, isDead, color }
+const players = new Map(); // id -> { mesh, targetPos, targetRot, velocity, lives, isDead, color, name, nameSprite }
 let localId = null;
 let carModelTemplate = null; // GLTF scene template to clone for remote players
 let socket = null;
@@ -79,6 +131,14 @@ let gameState = {
     isHost: false, // Si ce client est l'hôte
     canPlay: false // Si ce client peut jouer (pas juste spectateur)
 };
+
+// Powerups sur la map
+const powerups = [];
+const powerupTypes = [
+    { type: 'speed', color: 0x00ffff, icon: '⚡' },
+    { type: 'shield', color: 0xffff00, icon: '🛡️' },
+    { type: 'jump', color: 0xff00ff, icon: '🚀' }
+];
 
 // Fonction pour obtenir un spawn aléatoire sur la plateforme
 function getRandomSpawnPosition() {
@@ -92,14 +152,42 @@ function getRandomSpawnPosition() {
     };
 }
 
+// Créer un sprite de nom au-dessus d'une voiture
+function createNameSprite(name, color) {
+    const canvas = document.createElement('canvas');
+    const context = canvas.getContext('2d');
+    canvas.width = 256;
+    canvas.height = 64;
+    
+    // Fond semi-transparent
+    context.fillStyle = `rgba(0, 0, 0, 0.7)`;
+    context.fillRect(0, 0, canvas.width, canvas.height);
+    
+    // Texte
+    context.font = 'bold 32px Arial';
+    context.fillStyle = `#${color.getHexString()}`;
+    context.textAlign = 'center';
+    context.textBaseline = 'middle';
+    context.fillText(name, canvas.width / 2, canvas.height / 2);
+    
+    const texture = new THREE.CanvasTexture(canvas);
+    const spriteMaterial = new THREE.SpriteMaterial({ map: texture });
+    const sprite = new THREE.Sprite(spriteMaterial);
+    sprite.scale.set(4, 1, 1);
+    
+    return sprite;
+}
+
+// Se connecter d'abord, puis demander le pseudo
+function initWebSocket() {
 try {
     const proto = window.location.protocol === 'https:' ? 'wss' : 'ws';
     
-    // Fix: Don't add port in production, use the current origi
+    // Fix: Don't add port in production, use the current origin
     let wsUrl;
-    if (window.location.hostname === 'localhost') {
-        // Development: connect to local server on port 3000
-        wsUrl = `${proto}://localhost:3000`;
+    if (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') {
+        // Development: connect to local server on port 3001
+        wsUrl = `${proto}://localhost:3001`;
     } else {
         // Production: use same host without specifying port
         // Render will handle the port automatically (443 for wss)
@@ -108,8 +196,35 @@ try {
     
     socket = new WebSocket(wsUrl);
 
-    socket.addEventListener('open', () => {
+    socket.addEventListener('open', async () => {
         console.log('WS connected to', wsUrl);
+        
+        // Demander le pseudo maintenant
+        const name = await showNameModal();
+        playerName = name;
+        playerColor = generateColorFromSeed(name);
+        console.log('Player name:', name, 'Color:', playerColor.getHexString());
+        
+        // Mettre à jour la couleur de la voiture si elle est déjà chargée
+        if (car.mesh) {
+            car.mesh.traverse((c) => { 
+                if (c.isMesh && c.material) {
+                    c.material.color = playerColor.clone();
+                }
+            });
+            
+            // Ne pas créer le sprite de nom pour le joueur local
+            // (on ne veut pas voir son propre pseudo)
+        }
+        
+        // Envoyer immédiatement le pseudo et la couleur
+        if (socket.readyState === WebSocket.OPEN) {
+            socket.send(JSON.stringify({
+                type: 'player_info',
+                name: playerName,
+                color: playerColor.getHex()
+            }));
+        }
     });
     socket.addEventListener('message', (ev) => {
         try {
@@ -119,11 +234,19 @@ try {
                 gameState.isHost = msg.isHost;
                 gameState.canPlay = msg.canPlay;
                 gameState.isGameActive = msg.gameActive;
-                console.log('Assigned id', localId, '| Host:', gameState.isHost, '| Can play:', gameState.canPlay);
+                console.log('Assigned id', localId, '| Host:', gameState.isHost, '| Can play:', gameState.canPlay, '| Game active:', gameState.isGameActive);
+                
+                // Si on peut jouer et que le jeu n'est pas actif, on peut quand même se déplacer (lobby)
+                // Le jeu démarre vraiment quand l'hôte clique sur "DÉMARRER"
+                if (gameState.canPlay && !gameState.isGameActive) {
+                    console.log('Lobby mode - you can move around');
+                }
                 
                 // Afficher UI de contrôle si hôte
                 if (gameState.isHost) {
                     showHostControls();
+                    // Générer les powerups initiaux
+                    setTimeout(() => initializePowerups(), 1000);
                 }
                 
                 // Si le jeu n'est pas actif et qu'on ne peut pas jouer, mode spectateur
@@ -140,14 +263,48 @@ try {
                     scene.remove(p.mesh);
                     players.delete(msg.id);
                 }
+            } else if (msg.type === 'player_info') {
+                // Recevoir les infos d'un joueur (nom, couleur)
+                const id = msg.sender;
+                if (id === localId) return;
+                
+                const remoteColor = new THREE.Color(msg.color);
+                const remoteName = msg.name;
+                
+                console.log(`Player ${id} info: ${remoteName}, color: ${remoteColor.getHexString()}`);
+                
+                // Si le joueur existe déjà, mettre à jour ses infos
+                if (players.has(id)) {
+                    const p = players.get(id);
+                    p.color = remoteColor;
+                    p.name = remoteName;
+                    
+                    // Mettre à jour la couleur de la voiture
+                    if (p.mesh) {
+                        p.mesh.traverse((c) => {
+                            if (c.isMesh && c.material) {
+                                c.material.color = remoteColor.clone();
+                            }
+                        });
+                    }
+                    
+                    // Créer/Mettre à jour le sprite de nom
+                    if (p.nameSprite) {
+                        scene.remove(p.nameSprite);
+                    }
+                    p.nameSprite = createNameSprite(remoteName, remoteColor);
+                    p.nameSprite.position.copy(p.mesh.position);
+                    p.nameSprite.position.y += 2;
+                    scene.add(p.nameSprite);
+                }
             } else if (msg.type === 'state') {
                 // update or create remote player
                 const id = msg.sender;
                 if (id === localId) return;
                 let p = players.get(id);
                 if (!p) {
-                    // Générer une couleur aléatoire pour ce joueur
-                    const playerColor = new THREE.Color().setHSL(Math.random(), 0.8, 0.5);
+                    // Utiliser couleur par défaut en attendant player_info
+                    const playerColor = new THREE.Color(0xcccccc);
                     
                     let mesh;
                     if (carModelTemplate) {
@@ -208,9 +365,10 @@ try {
                 }
             } else if (msg.type === 'collision_push') {
                 // Recevoir une poussée de collision
-                if (msg.target === localId && car.mesh && !car.isDead) {
+                if (msg.target === localId && car.mesh && !car.isDead && !car.isInvulnerable) {
                     const pushForce = new THREE.Vector3(msg.forceX || 0, msg.forceY || 0, msg.forceZ || 0);
-                    car.mesh.position.add(pushForce);
+                    // Utiliser knockbackVelocity pour un mouvement fluide
+                    car.knockbackVelocity.add(pushForce);
                     car.speed *= 0.5; // Réduire vitesse de celui qui est frappé
                     flashCollisionEffect();
                 }
@@ -219,6 +377,20 @@ try {
                 gameState.isHost = true;
                 console.log('You are now the host!');
                 showHostControls();
+                // Générer les powerups initiaux
+                initializePowerups();
+            } else if (msg.type === 'powerup_spawn') {
+                // Recevoir un nouveau powerup du serveur
+                spawnPowerupAt(msg.powerupType, msg.x, msg.y, msg.z, msg.powerupId);
+            } else if (msg.type === 'powerup_collect') {
+                // Un autre joueur a collecté un powerup
+                const powerupIndex = powerups.findIndex(p => p.id === msg.powerupId);
+                if (powerupIndex !== -1) {
+                    const powerup = powerups[powerupIndex];
+                    scene.remove(powerup.mesh);
+                    scene.remove(powerup.sprite);
+                    powerups.splice(powerupIndex, 1);
+                }
             } else if (msg.type === 'game_restart') {
                 // Redémarrer le jeu
                 handleGameRestart(msg);
@@ -258,6 +430,7 @@ try {
 } catch (e) {
     console.warn('Multiplayer disabled:', e);
 }
+} // Fin de initWebSocket
 
 // Fonction pour notifier que le joueur est tombé
 function notifyFall() {
@@ -492,7 +665,22 @@ const car = {
     // Collision properties
     collisionRadius: 1.2, // rayon de collision
     collisionCooldown: 0, // temps avant prochaine collision possible
-    collisionCooldownTime: 0.5 // secondes (réduit pour plus de réactivité)
+    collisionCooldownTime: 0.5, // secondes (réduit pour plus de réactivité)
+    // Invulnérabilité au spawn
+    isInvulnerable: true, // Invulnérable au départ
+    invulnerabilityDuration: 3.0, // 3 secondes d'invulnérabilité
+    invulnerabilityTimer: 3.0,
+    hasMovedOnce: false, // Pour détecter le premier mouvement
+    // Jump
+    isJumping: false,
+    jumpVelocity: 0,
+    jumpForce: 15,
+    gravity: -30,
+    // Powerups actifs
+    activePowerups: [],
+    // Knockback
+    knockbackVelocity: new THREE.Vector3(0, 0, 0),
+    nameSprite: null // Sprite du nom du joueur
 };
 
 const loader = new GLTFLoader();
@@ -514,12 +702,12 @@ loader.load('sprite/Mazda RX-7.glb', (gltf) => {
     // create the local car by cloning the template so we can reuse the template for remotes
     car.mesh = carModelTemplate.clone(true);
     
-    // Couleur aléatoire pour le joueur local
-    const localColor = new THREE.Color().setHSL(Math.random(), 0.8, 0.5);
+    // Utiliser la couleur générée depuis le pseudo (ou couleur par défaut si pas encore définie)
+    const currentPlayerColor = playerColor || new THREE.Color(0xff0000);
     car.mesh.traverse((c) => { 
         if (c.isMesh && c.material) {
             c.material = c.material.clone();
-            c.material.color = localColor.clone();
+            c.material.color = currentPlayerColor.clone();
         }
     });
     
@@ -532,7 +720,11 @@ loader.load('sprite/Mazda RX-7.glb', (gltf) => {
     car.mesh.rotation.y = spawn.rotY;
     
     scene.add(car.mesh);
-    console.log('Local car color:', localColor.getHexString());
+    console.log('Local car color:', currentPlayerColor.getHexString(), 'Name:', playerName);
+    
+    // Ne pas créer le sprite de nom pour le joueur local (on ne veut pas voir son propre pseudo)
+    // car.nameSprite reste null pour le joueur local
+    
     // hide placeholder
     carPlaceholder.visible = false;
     
@@ -586,6 +778,180 @@ scene.add(dirLight);
 // Lumière ambiante supplémentaire
 const ambientLight = new THREE.AmbientLight(0xffffff, 0.5);
 scene.add(ambientLight);
+
+// === Système de Powerups ===
+// Fonction pour générer un powerup (appelée par l'hôte ou quand on reçoit des données du serveur)
+function spawnPowerupAt(typeStr, x, y, z, id) {
+    const typeInfo = powerupTypes.find(t => t.type === typeStr);
+    if (!typeInfo) return;
+    
+    // Créer le mesh du powerup (cube qui tourne)
+    const geometry = new THREE.BoxGeometry(1, 1, 1);
+    const material = new THREE.MeshStandardMaterial({
+        color: typeInfo.color,
+        emissive: typeInfo.color,
+        emissiveIntensity: 0.5,
+        metalness: 0.7,
+        roughness: 0.3
+    });
+    const mesh = new THREE.Mesh(geometry, material);
+    mesh.position.set(x, y, z);
+    scene.add(mesh);
+    
+    // Créer sprite d'icône au-dessus
+    const canvas = document.createElement('canvas');
+    const context = canvas.getContext('2d');
+    canvas.width = 64;
+    canvas.height = 64;
+    context.font = 'bold 48px Arial';
+    context.textAlign = 'center';
+    context.textBaseline = 'middle';
+    context.fillText(typeInfo.icon, 32, 32);
+    
+    const texture = new THREE.CanvasTexture(canvas);
+    const spriteMaterial = new THREE.SpriteMaterial({ map: texture });
+    const sprite = new THREE.Sprite(spriteMaterial);
+    sprite.scale.set(1.5, 1.5, 1);
+    sprite.position.set(x, y + 1.5, z);
+    scene.add(sprite);
+    
+    powerups.push({
+        id: id,
+        type: typeStr,
+        mesh: mesh,
+        sprite: sprite,
+        collected: false,
+        rotation: 0
+    });
+}
+
+// Fonction pour générer un nouveau powerup (seulement l'hôte)
+function generateNewPowerup() {
+    if (!gameState.isHost) return;
+    
+    const typeStr = powerupTypes[Math.floor(Math.random() * powerupTypes.length)].type;
+    const pos = getRandomSpawnPosition();
+    const powerupId = Date.now() + Math.random();
+    
+    // Notifier le serveur
+    if (socket && socket.readyState === WebSocket.OPEN) {
+        socket.send(JSON.stringify({
+            type: 'powerup_spawn',
+            powerupId: powerupId,
+            powerupType: typeStr,
+            x: pos.x,
+            y: 1,
+            z: pos.z
+        }));
+    }
+    
+    // Créer localement aussi
+    spawnPowerupAt(typeStr, pos.x, 1, pos.z, powerupId);
+}
+
+// L'hôte génère les powerups initiaux après connexion
+function initializePowerups() {
+    if (!gameState.isHost) return;
+    
+    for (let i = 0; i < 5; i++) {
+        setTimeout(() => generateNewPowerup(), i * 200);
+    }
+}
+
+// Respawn périodique des powerups (seulement l'hôte)
+setInterval(() => {
+    if (gameState.isHost && powerups.length < 8) {
+        generateNewPowerup();
+    }
+}, 10000);
+
+function checkPowerupCollection() {
+    if (!car.mesh || car.isDead) return;
+    
+    powerups.forEach((powerup, index) => {
+        if (powerup.collected) return;
+        
+        const dist = car.mesh.position.distanceTo(powerup.mesh.position);
+        if (dist < 2) {
+            // Collecter le powerup
+            powerup.collected = true;
+            
+            // Notifier le serveur de la collecte
+            if (socket && socket.readyState === WebSocket.OPEN) {
+                socket.send(JSON.stringify({
+                    type: 'powerup_collect',
+                    powerupId: powerup.id
+                }));
+            }
+            
+            // Supprimer localement
+            scene.remove(powerup.mesh);
+            scene.remove(powerup.sprite);
+            powerups.splice(index, 1);
+            
+            // Appliquer l'effet
+            applyPowerup(powerup.type);
+            
+            // Notification
+            showPowerupNotification(powerup.type);
+        }
+    });
+}
+
+function applyPowerup(type) {
+    const duration = 5000; // 5 secondes
+    
+    switch(type) {
+        case 'speed':
+            car.baseMaxSpeed = 250;
+            car.baseAccel = 30;
+            car.activePowerups.push({ type: 'speed', endTime: Date.now() + duration });
+            setTimeout(() => {
+                car.baseMaxSpeed = 190;
+                car.baseAccel = 20;
+                car.activePowerups = car.activePowerups.filter(p => p.type !== 'speed');
+            }, duration);
+            break;
+            
+        case 'shield':
+            car.isInvulnerable = true;
+            car.activePowerups.push({ type: 'shield', endTime: Date.now() + duration });
+            setTimeout(() => {
+                if (!car.hasMovedOnce) return; // Garder l'invulnérabilité spawn
+                car.isInvulnerable = false;
+                car.activePowerups = car.activePowerups.filter(p => p.type !== 'shield');
+            }, duration);
+            break;
+            
+        case 'jump':
+            // Jump boost temporaire
+            const oldJumpForce = car.jumpForce;
+            car.jumpForce = 25;
+            car.activePowerups.push({ type: 'jump', endTime: Date.now() + duration });
+            setTimeout(() => {
+                car.jumpForce = oldJumpForce;
+                car.activePowerups = car.activePowerups.filter(p => p.type !== 'jump');
+            }, duration);
+            break;
+    }
+}
+
+function showPowerupNotification(type) {
+    const typeInfo = powerupTypes.find(t => t.type === type);
+    const notification = document.createElement('div');
+    notification.className = 'powerup-notification';
+    notification.innerHTML = `
+        <div style="font-size: 48px;">${typeInfo.icon}</div>
+        <div style="font-size: 20px; font-weight: bold;">POWERUP!</div>
+    `;
+    document.body.appendChild(notification);
+    
+    setTimeout(() => notification.classList.add('show'), 10);
+    setTimeout(() => {
+        notification.classList.remove('show');
+        setTimeout(() => notification.remove(), 300);
+    }, 2000);
+}
 
 // Input handling (ZQSD + WASD)
 const keys = {};
@@ -669,7 +1035,7 @@ const hudLives = hud.querySelector('#hud-lives');
 // === Système de collision entre voitures (SANS perte de vie) ===
 // A touche B -> B prend le recul, pas A
 function checkCollisions(dt) {
-    if (!car.mesh || car.isDead) return;
+    if (!car.mesh || car.isDead || car.isInvulnerable) return;
     
     // Décrémenter cooldown
     if (car.collisionCooldown > 0) {
@@ -699,20 +1065,23 @@ function checkCollisions(dt) {
                 .multiplyScalar(car.speed * 0.1);
             
             // Calculer force d'impact basée sur la vitesse de A
-            const impactForce = Math.abs(car.speed) * 0.035; // AUGMENTÉ pour plus de recul
+            const impactForce = Math.abs(car.speed) * 0.05; // Augmenté
             
-            // Physique de rebond - SEULEMENT le joueur distant recule
-            const restitution = 1.2; // AUGMENTÉ
-            const separationForce = 2.5; // AUGMENTÉ
+            // Physique de rebond améliorée
+            const restitution = 1.5;
+            const separationForce = 3.0;
+            
+            const pushForce = collisionVector.clone()
+                .multiplyScalar(impactForce * restitution + separationForce);
             
             // Envoyer notification de collision au serveur avec force
             if (socket && socket.readyState === WebSocket.OPEN) {
                 socket.send(JSON.stringify({ 
                     type: 'collision_push',
                     target: id,
-                    forceX: collisionVector.x * (impactForce * restitution + separationForce),
+                    forceX: pushForce.x,
                     forceY: 0,
-                    forceZ: collisionVector.z * (impactForce * restitution + separationForce)
+                    forceZ: pushForce.z
                 }));
             }
             
@@ -1280,11 +1649,60 @@ function animate() {
     // Vérifier si tombé de la plateforme
     checkFallOffPlatform();
     
+    // Vérifier collecte de powerups
+    checkPowerupCollection();
+    
+    // Animer les powerups (rotation)
+    powerups.forEach(powerup => {
+        if (!powerup.collected) {
+            powerup.rotation += dt * 2;
+            powerup.mesh.rotation.y = powerup.rotation;
+            powerup.mesh.position.y = 1 + Math.sin(powerup.rotation * 2) * 0.3;
+            powerup.sprite.position.y = powerup.mesh.position.y + 1.5;
+        }
+    });
+    
     // Mettre à jour affichage des vies
     updateLivesDisplay();
+    
+    // Gérer invulnérabilité au spawn
+    if (car.isInvulnerable && car.hasMovedOnce && car.invulnerabilityTimer > 0) {
+        car.invulnerabilityTimer -= dt;
+        if (car.invulnerabilityTimer <= 0) {
+            car.isInvulnerable = false;
+        }
+        
+        // Effet visuel clignotant
+        if (car.mesh) {
+            car.mesh.traverse((c) => {
+                if (c.isMesh && c.material) {
+                    c.material.opacity = 0.3 + Math.sin(Date.now() * 0.01) * 0.3;
+                    c.material.transparent = true;
+                }
+            });
+        }
+    } else if (car.mesh && !car.isInvulnerable) {
+        // Remettre opacité normale
+        car.mesh.traverse((c) => {
+            if (c.isMesh && c.material) {
+                c.material.opacity = 1.0;
+                c.material.transparent = false;
+            }
+        });
+    }
+    
+    // Mettre à jour positions des noms des joueurs distants seulement
+    // (pas de sprite de nom pour le joueur local)
+    players.forEach(player => {
+        if (player.nameSprite && player.mesh) {
+            player.nameSprite.position.copy(player.mesh.position);
+            player.nameSprite.position.y += 2;
+        }
+    });
 
-    // --- car kinematics & input (seulement si vivant ET jeu actif ET peut jouer) ---
-    if (car.mesh && !car.isDead && gameState.isGameActive && gameState.canPlay) {
+    // --- car kinematics & input (seulement si vivant ET peut jouer) ---
+    // On peut bouger même en lobby (isGameActive=false) tant qu'on peut jouer (canPlay=true)
+    if (car.mesh && !car.isDead && gameState.canPlay) {
         // forward/back
         let forward = 0;
         if (keys['s'] ) forward += 5;
@@ -1294,9 +1712,24 @@ function animate() {
         let turn = 0;
         if (keys['q'] || keys['a']) turn += 1;
         if (keys['d']) turn -= 1;
+        
+        // Détecter le premier mouvement pour désactiver l'invulnérabilité
+        if ((forward !== 0 || turn !== 0) && !car.hasMovedOnce) {
+            car.hasMovedOnce = true;
+            console.log('First movement detected, starting invulnerability timer');
+        }
+        
+        // Jump avec F
+        if (keys['f'] && !car.isJumping && car.mesh.position.y <= 0.3) {
+            car.isJumping = true;
+            car.jumpVelocity = car.jumpForce;
+        }
 
             // boost state (Shift)
             const boosting = !!keys['shift'];
+            
+            // Skidding state (Space)
+            const skidding = !car.isJumping && (keys[' '] || keys['space']) && Math.abs(car.speed) > car.skidMinSpeed;
             // energy logic: drain while boosting, regen after delay when not boosting
             if (boosting && car.boostEnergy > 0) {
                 car.boostEnergy = Math.max(0, car.boostEnergy - car.energyDrainRate * dt);
@@ -1335,31 +1768,39 @@ function animate() {
 
         // apply turn proportional to speed sign
         const sign = Math.sign(car.speed || 1);
-        // Space = skid: increase turning radius -> reduce responsiveness but apply lateral slip and extra yaw
-        const skidding = !!(keys[' '] || keys['space'] || keys['spacebar']);
-        const turnFactor = skidding ? 1.25 : 1.0; // smaller factor => larger turning radius
-        // base rotation
-        let deltaYaw = turn * car.turnSpeed * dt * (Math.abs(car.speed) / car.maxSpeed) * turnFactor;
-        // if skidding and turning, apply extra yaw and lateral slide
-        if (skidding && Math.abs(turn) > 0.01 && Math.abs(car.speed) > car.skidMinSpeed) {
-            // extra yaw to make car rotate more while sliding
-            deltaYaw *= car.skidYawMultiplier;
-            // compute lateral slide direction (perpendicular to forward)
-            const forwardDir = new THREE.Vector3(0, 0, -1).applyQuaternion(car.mesh.quaternion).normalize();
-            const lateralDir = new THREE.Vector3().copy(forwardDir).applyAxisAngle(new THREE.Vector3(0,1,0), Math.PI/2 * Math.sign(turn));
-            // add lateral velocity proportional to skidStrength and current speed
-            const slideVel = lateralDir.multiplyScalar(car.skidStrength * (Math.abs(car.speed) / car.maxSpeed) * Math.abs(turn));
-            car.mesh.position.add(slideVel.multiplyScalar(dt * 6.0)); // amplified for visible effect
-            // stronger skid particles when actively turning
-            const skidLeftLocal = new THREE.Vector3(-0.28, 0.02, -1.05);
-            const skidRightLocal = new THREE.Vector3(0.28, 0.02, -1.05);
-            const skidLeftWorld = skidLeftLocal.applyMatrix4(car.mesh.matrixWorld);
-            const skidRightWorld = skidRightLocal.applyMatrix4(car.mesh.matrixWorld);
-            // emit more skid particles when actively drifting
-            emitSkidParticlesAt(skidLeftWorld, 2);
-            emitSkidParticlesAt(skidRightWorld, 2);
+        let deltaYaw = turn * car.turnSpeed * dt * (Math.abs(car.speed) / car.maxSpeed);
+        
+        // Augmenter l'angle de rotation pendant le drift
+        if (skidding) {
+            deltaYaw *= car.skidYawMultiplier; // Multiplier l'angle quand on drift
         }
+        
         car.mesh.rotation.y += deltaYaw;
+
+        // Physique du jump
+        if (car.isJumping) {
+            car.jumpVelocity += car.gravity * dt;
+            car.mesh.position.y += car.jumpVelocity * dt;
+            
+            // Atterrissage
+            if (car.mesh.position.y <= 0.2) {
+                car.mesh.position.y = 0.2;
+                car.isJumping = false;
+                car.jumpVelocity = 0;
+            }
+        }
+        
+        // Appliquer le knockback s'il existe
+        if (car.knockbackVelocity.length() > 0.01) {
+            car.mesh.position.add(car.knockbackVelocity.clone().multiplyScalar(dt));
+            // Friction pour ralentir le knockback
+            car.knockbackVelocity.multiplyScalar(0.92);
+            
+            // Arrêter si trop lent
+            if (car.knockbackVelocity.length() < 0.1) {
+                car.knockbackVelocity.set(0, 0, 0);
+            }
+        }
 
         // move forward along local Z (negative Z is forward in many model conventions)
         const forwardVec = new THREE.Vector3(0, 0, -1).applyQuaternion(car.mesh.quaternion).multiplyScalar(car.speed * dt * 0.1);
@@ -1533,6 +1974,8 @@ function animate() {
     renderer.render(scene, camera);
 }
 
+// Initialiser la connexion WebSocket et démarrer l'animation
+initWebSocket();
 animate();
 
 

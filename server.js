@@ -46,7 +46,9 @@ wss.on('connection', (ws) => {
     lives: 3,
     isDead: false,
     canPlay: canPlay,
-    lastUpdate: Date.now()
+    lastUpdate: Date.now(),
+    name: 'Player ' + id,
+    color: 0xcccccc
   });
 
   // send back assigned id avec statut
@@ -105,6 +107,16 @@ wss.on('connection', (ws) => {
         }
       }
 
+      // Gérer infos du joueur (nom et couleur)
+      if (data.type === 'player_info') {
+        const state = playerStates.get(id);
+        if (state) {
+          state.name = data.name || 'Player ' + id;
+          state.color = data.color || 0xcccccc;
+          console.log(`Player ${id} info: ${state.name}, color: ${state.color.toString(16)}`);
+        }
+      }
+
       // Gérer collision avec poussée (A pousse B)
       if (data.type === 'collision_push' && data.target) {
         // Relayer la poussée au joueur ciblé
@@ -128,13 +140,37 @@ wss.on('connection', (ws) => {
         startNewGame();
       }
 
-      // Broadcast à tous les autres clients
-      const out = JSON.stringify(data);
-      wss.clients.forEach((client) => {
-        if (client.readyState === WebSocket.OPEN && client !== ws) {
-          client.send(out);
-        }
-      });
+      // Gérer spawn de powerup (seulement l'hôte peut spawner)
+      if (data.type === 'powerup_spawn' && id === hostId) {
+        console.log('Host spawned powerup:', data.powerupType);
+        // Broadcaster à tous les clients (y compris l'hôte qui l'a déjà)
+        wss.clients.forEach((client) => {
+          if (client.readyState === WebSocket.OPEN && client !== ws) {
+            client.send(JSON.stringify(data));
+          }
+        });
+      }
+
+      // Gérer collecte de powerup (n'importe quel joueur peut collecter)
+      if (data.type === 'powerup_collect') {
+        console.log(`Player ${id} collected powerup ${data.powerupId}`);
+        // Broadcaster à tous les clients
+        wss.clients.forEach((client) => {
+          if (client.readyState === WebSocket.OPEN && client !== ws) {
+            client.send(JSON.stringify(data));
+          }
+        });
+      }
+
+      // Broadcast à tous les autres clients (pour les autres types de messages)
+      if (data.type !== 'powerup_spawn' && data.type !== 'powerup_collect') {
+        const out = JSON.stringify(data);
+        wss.clients.forEach((client) => {
+          if (client.readyState === WebSocket.OPEN && client !== ws) {
+            client.send(out);
+          }
+        });
+      }
     } catch (e) {
       console.warn('Invalid message from', id, e);
     }
