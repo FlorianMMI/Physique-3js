@@ -117,6 +117,22 @@ wss.on('connection', (ws) => {
         }
       }
 
+      // Gérer demande de refresh des infos des joueurs
+      if (data.type === 'request_player_infos') {
+        console.log(`Player ${id} requested player infos`);
+        // Envoyer les infos de tous les autres joueurs à celui qui demande
+        playerStates.forEach((state, playerId) => {
+          if (playerId !== id && state.name && state.color) {
+            ws.send(JSON.stringify({
+              type: 'player_info',
+              sender: playerId,
+              name: state.name,
+              color: state.color
+            }));
+          }
+        });
+      }
+
       // Gérer collision avec poussée (A pousse B)
       if (data.type === 'collision_push' && data.target) {
         // Relayer la poussée au joueur ciblé
@@ -163,7 +179,8 @@ wss.on('connection', (ws) => {
       }
 
       // Broadcast à tous les autres clients (pour les autres types de messages)
-      if (data.type !== 'powerup_spawn' && data.type !== 'powerup_collect') {
+      // Ne pas broadcaster request_player_infos car c'est une requête individuelle
+      if (data.type !== 'powerup_spawn' && data.type !== 'powerup_collect' && data.type !== 'request_player_infos') {
         const out = JSON.stringify(data);
         wss.clients.forEach((client) => {
           if (client.readyState === WebSocket.OPEN && client !== ws) {

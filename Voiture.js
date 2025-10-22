@@ -224,6 +224,11 @@ try {
                 name: playerName,
                 color: playerColor.getHex()
             }));
+            
+            // Demander aussi un refresh des infos des autres joueurs
+            socket.send(JSON.stringify({
+                type: 'request_player_infos'
+            }));
         }
     });
     socket.addEventListener('message', (ev) => {
@@ -676,6 +681,8 @@ const car = {
     jumpVelocity: 0,
     jumpForce: 15,
     gravity: -30,
+    jumpCooldown: 0, // cooldown pour éviter les sauts multiples
+    jumpCooldownTime: 0.5, // 0.5 secondes entre chaque saut
     // Powerups actifs
     activePowerups: [],
     // Knockback
@@ -1065,11 +1072,11 @@ function checkCollisions(dt) {
                 .multiplyScalar(car.speed * 0.1);
             
             // Calculer force d'impact basée sur la vitesse de A
-            const impactForce = Math.abs(car.speed) * 0.05; // Augmenté
+            const impactForce = Math.abs(car.speed) * 0.08; // Augmenté encore
             
             // Physique de rebond améliorée
-            const restitution = 1.5;
-            const separationForce = 3.0;
+            const restitution = 2.0; // Augmenté de 1.5 à 2.0
+            const separationForce = 5.0; // Augmenté de 3.0 à 5.0
             
             const pushForce = collisionVector.clone()
                 .multiplyScalar(impactForce * restitution + separationForce);
@@ -1719,10 +1726,16 @@ function animate() {
             console.log('First movement detected, starting invulnerability timer');
         }
         
-        // Jump avec F
-        if (keys['f'] && !car.isJumping && car.mesh.position.y <= 0.3) {
+        // Décrémenter le cooldown du saut
+        if (car.jumpCooldown > 0) {
+            car.jumpCooldown -= dt;
+        }
+        
+        // Jump avec F (avec cooldown)
+        if (keys['f'] && !car.isJumping && car.mesh.position.y <= 0.3 && car.jumpCooldown <= 0) {
             car.isJumping = true;
             car.jumpVelocity = car.jumpForce;
+            car.jumpCooldown = car.jumpCooldownTime; // Activer le cooldown
         }
 
             // boost state (Shift)
