@@ -1075,8 +1075,8 @@ function checkCollisions(dt) {
             const impactForce = Math.abs(car.speed) * 0.08; // Augmenté encore
             
             // Physique de rebond améliorée
-            const restitution = 2.0; // Augmenté de 1.5 à 2.0
-            const separationForce = 5.0; // Augmenté de 3.0 à 5.0
+            const restitution = 3.0; // Augmenté de 1.5 à 2.0
+            const separationForce = 8.0; // Augmenté de 3.0 à 5.0
             
             const pushForce = collisionVector.clone()
                 .multiplyScalar(impactForce * restitution + separationForce);
