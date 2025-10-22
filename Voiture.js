@@ -1484,7 +1484,7 @@ function checkFallOffPlatform() {
             // No lives left -> spectator
             car.isDead = true;
             enterSpectatorMode();
-            notifyFall();
+            notifyFall(); // Only notify fall when truly dead (no lives left)
             return;
         }
 
@@ -1500,8 +1500,7 @@ function checkFallOffPlatform() {
         if (car.mesh) {
             car.mesh.visible = false;
         }
-        // Notify server of fall
-        notifyFall();
+        // DON'T notify fall when still alive - server will think we're dead
     } else {
         // No action on re-enter: respawnPending controls when the player returns
     }
@@ -1518,7 +1517,7 @@ function applyLifeLoss() {
     if (car.lives <= 0) {
         car.isDead = true;
         enterSpectatorMode();
-        notifyFall();
+        notifyFall(); // Only notify when truly dead
         return;
     }
 
@@ -1530,6 +1529,7 @@ function applyLifeLoss() {
         ejection.uiElem.textContent = `Respawn dans ${ejection.timer.toFixed(1)}s`;
     }
     if (car.mesh) car.mesh.visible = false;
+    // DON'T call notifyFall() here - we're still alive!
 }
 
 // Effet visuel de flash rouge lors d'une collision (DÉSACTIVÉ - trop agressif)
@@ -2018,12 +2018,12 @@ function animate() {
     // Interpolation fluide des joueurs distants
     players.forEach((player, id) => {
         if (player.mesh && player.targetPos) {
-            // Interpolation de position avec prédiction basée sur vélocité
+            // Interpolation de position avec prédiction légère basée sur vélocité
             const predictedPos = player.targetPos.clone()
-                .add(player.velocity.clone().multiplyScalar(dt * 2)); // prédiction 2 frames ahead
+                .add(player.velocity.clone().multiplyScalar(dt * 0.5)); // prédiction réduite pour moins de lag visuel
             
-            // Lerp vers position prédite pour mouvement plus fluide
-            player.mesh.position.lerp(predictedPos, 0.3);
+            // Lerp vers position prédite avec smoothing plus fort
+            player.mesh.position.lerp(predictedPos, 0.15); // réduit de 0.3 à 0.15 pour plus de fluidité
             
             // Interpolation de rotation
             const currentRot = player.mesh.rotation.y;
@@ -2033,7 +2033,7 @@ function animate() {
             if (rotDiff > Math.PI) rotDiff -= Math.PI * 2;
             if (rotDiff < -Math.PI) rotDiff += Math.PI * 2;
             
-            player.mesh.rotation.y += rotDiff * 0.25; // lerp rotation
+            player.mesh.rotation.y += rotDiff * 0.2; // lerp rotation légèrement plus lent
         }
     });
 
