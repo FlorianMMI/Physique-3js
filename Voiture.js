@@ -60,7 +60,7 @@ const scene = new THREE.Scene();
 scene.background = new THREE.Color(0x87ceeb); // Ciel bleu
 
 // Créer une plateforme circulaire
-const platformRadius = 40; // Taille réduite pour plus de challenge
+let platformRadius = 40; // Taille initiale réduite pour plus de challenge
 const platformGeometry = new THREE.CylinderGeometry(platformRadius, platformRadius, 2, 32);
 const platformMaterial = new THREE.MeshStandardMaterial({ 
     color: 0x4a4a4a,
@@ -82,6 +82,47 @@ const edge = new THREE.Mesh(edgeGeometry, edgeMaterial);
 edge.rotation.x = Math.PI / 2;
 edge.position.y = 0;
 scene.add(edge);
+
+// Zone mechanics: shrinking over time
+let zoneRadius = platformRadius; // current safe radius
+const zone = {
+    initialRadius: platformRadius,
+    // Shrinking disabled by user request. Keep zone static at platformRadius.
+    shrinkStartTime: Infinity,
+    shrinkDuration: 0,
+    minRadius: platformRadius
+};
+
+// Ejection grace timer
+let ejection = {
+    isOut: false,
+    timer: 0,
+    graceTime: 3.0, // not used as a return grace; kept for UI text
+    uiElem: null,
+    // respawn flow: when leaving zone we immediately lose a life and then respawn after respawnDelay
+    respawnPending: false,
+    respawnDelay: 3.0 // seconds until respawn after death by zone exit
+};
+
+// Ejection UI
+function createEjectionUI() {
+    const div = document.createElement('div');
+    div.id = 'eject-ui';
+    div.style.position = 'fixed';
+    div.style.top = '50%';
+    div.style.left = '50%';
+    div.style.transform = 'translate(-50%, -50%)';
+    div.style.padding = '12px 18px';
+    div.style.background = 'rgba(0,0,0,0.7)';
+    div.style.color = 'white';
+    div.style.fontSize = '20px';
+    div.style.borderRadius = '10px';
+    div.style.zIndex = '10002';
+    div.style.display = 'none';
+    document.body.appendChild(div);
+    ejection.uiElem = div;
+}
+createEjectionUI();
 
 
 
@@ -670,7 +711,7 @@ const car = {
     // Collision properties
     collisionRadius: 1.2, // rayon de collision
     collisionCooldown: 0, // temps avant prochaine collision possible
-    collisionCooldownTime: 0.5, // secondes (réduit pour plus de réactivité)
+    collisionCooldownTime: 2, // secondes (réduit pour plus de réactivité)
     // Invulnérabilité au spawn
     isInvulnerable: true, // Invulnérable au départ
     invulnerabilityDuration: 3.0, // 3 secondes d'invulnérabilité
@@ -962,8 +1003,66 @@ function showPowerupNotification(type) {
 
 // Input handling (ZQSD + WASD)
 const keys = {};
+const mouseButtons = {};
+
+// Configuration des touches (modifiable)
+const keyBindings = {
+    forward: ['z', 'w'],
+    backward: ['s'],
+    left: ['q', 'a'],
+    right: ['d'],
+    boost: ['shift'],
+    drift: [' ', 'space'],
+    jump: ['f']
+};
+
+// Fonction pour vérifier si une touche d'action est pressée
+function isKeyPressed(action) {
+    return keyBindings[action].some(key => {
+        if (!key) return false;
+        const lk = key.toLowerCase();
+        if (lk.startsWith('mouse')) {
+            return !!mouseButtons[lk];
+        }
+        return !!keys[lk];
+    });
+}
+
+// Fonction pour changer une touche
+function changeKey(action, newKey) {
+    if (keyBindings[action]) {
+        keyBindings[action] = [newKey.toLowerCase()];
+        saveKeyBindings();
+    }
+}
+
+// Sauvegarder les touches dans le localStorage
+function saveKeyBindings() {
+    localStorage.setItem('keyBindings', JSON.stringify(keyBindings));
+}
+
+// Charger les touches depuis le localStorage
+function loadKeyBindings() {
+    const saved = localStorage.getItem('keyBindings');
+    if (saved) {
+        const loaded = JSON.parse(saved);
+        Object.assign(keyBindings, loaded);
+    }
+}
+
+// Charger les touches au démarrage
+loadKeyBindings();
+
 window.addEventListener('keydown', (e) => { keys[e.key.toLowerCase()] = true; });
 window.addEventListener('keyup', (e) => { keys[e.key.toLowerCase()] = false; });
+
+// Mouse buttons: 0 = left, 1 = middle, 2 = right
+window.addEventListener('mousedown', (e) => {
+    mouseButtons['mouse' + e.button] = true;
+});
+window.addEventListener('mouseup', (e) => {
+    mouseButtons['mouse' + e.button] = false;
+});
 
 /** Emit smoke at a world position */
 // emitSmokeAt is disabled — replace with no-op to stop smoke emission
@@ -1034,6 +1133,253 @@ const hudVy = hud.querySelector('#hud-vy');
 const hudBoostFill = hud.querySelector('#hud-boost-fill');
 const hudLives = hud.querySelector('#hud-lives');
 
+// HUD pour les powerups actifs
+const powerupHUD = document.createElement('div');
+powerupHUD.id = 'powerup-hud';
+powerupHUD.style.position = 'fixed';
+powerupHUD.style.bottom = '20px';
+powerupHUD.style.left = '20px';
+powerupHUD.style.display = 'flex';
+powerupHUD.style.flexDirection = 'column';
+powerupHUD.style.gap = '10px';
+powerupHUD.style.zIndex = '1000';
+document.body.appendChild(powerupHUD);
+
+// Bottom-right boost gauge (large, fancy)
+const boostGauge = document.createElement('div');
+boostGauge.id = 'boost-gauge';
+boostGauge.style.position = 'fixed';
+boostGauge.style.bottom = '20px';
+boostGauge.style.right = '20px';
+boostGauge.style.width = '260px';
+boostGauge.style.height = '48px';
+boostGauge.style.background = 'linear-gradient(90deg, rgba(0,0,0,0.8), rgba(0,0,0,0.6))';
+boostGauge.style.border = '2px solid rgba(255,255,255,0.08)';
+boostGauge.style.borderRadius = '12px';
+boostGauge.style.display = 'flex';
+boostGauge.style.alignItems = 'center';
+boostGauge.style.padding = '8px';
+boostGauge.style.gap = '12px';
+boostGauge.style.zIndex = '10000';
+boostGauge.style.boxShadow = '0 8px 24px rgba(0,0,0,0.6)';
+
+const boostIcon = document.createElement('div');
+boostIcon.innerHTML = '⚡';
+boostIcon.style.fontSize = '22px';
+boostIcon.style.width = '36px';
+boostIcon.style.textAlign = 'center';
+boostIcon.style.color = '#ffb347';
+boostGauge.appendChild(boostIcon);
+
+const boostBarWrap = document.createElement('div');
+boostBarWrap.style.flex = '1';
+boostBarWrap.style.height = '12px';
+boostBarWrap.style.background = 'rgba(255,255,255,0.08)';
+boostBarWrap.style.borderRadius = '8px';
+boostBarWrap.style.overflow = 'hidden';
+
+const boostBar = document.createElement('div');
+boostBar.style.height = '100%';
+boostBar.style.width = '100%';
+boostBar.style.background = 'linear-gradient(90deg,#ff8c00,#ffd27a)';
+boostBar.style.transformOrigin = 'left center';
+boostBar.style.transform = 'scaleX(1)';
+boostBar.style.transition = 'transform 0.1s linear';
+boostBarWrap.appendChild(boostBar);
+boostGauge.appendChild(boostBarWrap);
+
+const boostPct = document.createElement('div');
+boostPct.style.width = '40px';
+boostPct.style.textAlign = 'right';
+boostPct.style.color = 'white';
+boostPct.style.fontWeight = 'bold';
+boostPct.style.fontSize = '14px';
+boostGauge.appendChild(boostPct);
+
+document.body.appendChild(boostGauge);
+
+// Fonction pour mettre à jour l'affichage des powerups
+function updatePowerupDisplay() {
+    powerupHUD.innerHTML = '';
+    const now = Date.now();
+    
+    car.activePowerups.forEach(powerup => {
+        const timeLeft = Math.max(0, (powerup.endTime - now) / 1000);
+        if (timeLeft > 0) {
+            const powerupDiv = document.createElement('div');
+            powerupDiv.style.background = 'rgba(0, 0, 0, 0.8)';
+            powerupDiv.style.padding = '10px 15px';
+            powerupDiv.style.borderRadius = '8px';
+            powerupDiv.style.border = '2px solid';
+            powerupDiv.style.minWidth = '150px';
+            
+            const typeInfo = powerupTypes.find(t => t.type === powerup.type);
+            if (typeInfo) {
+                powerupDiv.style.borderColor = `#${typeInfo.color.toString(16).padStart(6, '0')}`;
+                
+                const progress = timeLeft / 5; // 5 secondes = durée totale
+                powerupDiv.innerHTML = `
+                    <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 5px;">
+                        <span style="font-size: 24px;">${typeInfo.icon}</span>
+                        <span style="color: white; font-weight: bold; text-transform: uppercase; font-size: 14px;">
+                            ${powerup.type}
+                        </span>
+                        <span style="color: #ffcc00; font-weight: bold; margin-left: auto;">
+                            ${timeLeft.toFixed(1)}s
+                        </span>
+                    </div>
+                    <div style="width: 100%; height: 4px; background: rgba(255,255,255,0.2); border-radius: 2px; overflow: hidden;">
+                        <div style="width: ${progress * 100}%; height: 100%; background: linear-gradient(90deg, #${typeInfo.color.toString(16).padStart(6, '0')}, #fff); transition: width 0.1s;"></div>
+                    </div>
+                `;
+            }
+            
+            powerupHUD.appendChild(powerupDiv);
+        }
+    });
+}
+
+// Menu de configuration des touches
+const keyConfigButton = document.createElement('button');
+keyConfigButton.textContent = '⚙️ Touches';
+keyConfigButton.style.position = 'fixed';
+keyConfigButton.style.top = '20px';
+keyConfigButton.style.right = '240px';
+keyConfigButton.style.padding = '10px 20px';
+keyConfigButton.style.background = 'rgba(0, 0, 0, 0.8)';
+keyConfigButton.style.color = 'white';
+keyConfigButton.style.border = '2px solid #00ff00';
+keyConfigButton.style.borderRadius = '8px';
+keyConfigButton.style.cursor = 'pointer';
+keyConfigButton.style.fontWeight = 'bold';
+keyConfigButton.style.fontSize = '14px';
+keyConfigButton.style.zIndex = '10001';
+document.body.appendChild(keyConfigButton);
+
+keyConfigButton.addEventListener('click', () => {
+    showKeyConfigMenu();
+});
+
+// Afficher le guide des touches au premier lancement
+function showControlsGuide() {
+    if (localStorage.getItem('controlsGuideShown')) {
+        return; // Ne montrer qu'une fois
+    }
+    
+    const guide = document.createElement('div');
+    guide.className = 'name-modal';
+    guide.innerHTML = `
+        <div class="name-modal-content" style="max-width: 600px;">
+            <h2>🎮 Contrôles du Jeu</h2>
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 15px; margin: 20px 0; text-align: left;">
+                <div style="padding: 10px; background: rgba(255,255,255,0.1); border-radius: 5px;">
+                    <strong>⬆️ Avancer:</strong> ${keyBindings.forward[0].toUpperCase()}
+                </div>
+                <div style="padding: 10px; background: rgba(255,255,255,0.1); border-radius: 5px;">
+                    <strong>⬇️ Reculer:</strong> ${keyBindings.backward[0].toUpperCase()}
+                </div>
+                <div style="padding: 10px; background: rgba(255,255,255,0.1); border-radius: 5px;">
+                    <strong>⬅️ Gauche:</strong> ${keyBindings.left[0].toUpperCase()}
+                </div>
+                <div style="padding: 10px; background: rgba(255,255,255,0.1); border-radius: 5px;">
+                    <strong>➡️ Droite:</strong> ${keyBindings.right[0].toUpperCase()}
+                </div>
+                <div style="padding: 10px; background: rgba(255,255,255,0.1); border-radius: 5px;">
+                    <strong>⚡ Boost:</strong> ${keyBindings.boost[0].toUpperCase()}
+                </div>
+                <div style="padding: 10px; background: rgba(255,255,255,0.1); border-radius: 5px;">
+                    <strong>💨 Drift:</strong> ${keyBindings.drift[0].toUpperCase()}
+                </div>
+                <div style="padding: 10px; background: rgba(255,255,255,0.1); border-radius: 5px; grid-column: 1 / -1;">
+                    <strong>🚀 Sauter:</strong> ${keyBindings.jump[0].toUpperCase()}
+                </div>
+            </div>
+            <p style="color: #ffcc00; font-size: 14px; margin: 15px 0;">
+                💡 Astuce : Cliquez sur "⚙️ Touches" en haut à droite pour personnaliser les contrôles !
+            </p>
+            <button id="close-guide" class="host-btn primary">Compris !</button>
+        </div>
+    `;
+    document.body.appendChild(guide);
+    
+    document.getElementById('close-guide').addEventListener('click', () => {
+        localStorage.setItem('controlsGuideShown', 'true');
+        guide.remove();
+    });
+}
+
+// Afficher le guide après un court délai
+setTimeout(() => {
+    showControlsGuide();
+}, 2000);
+
+function showKeyConfigMenu() {
+    const modal = document.createElement('div');
+    modal.className = 'name-modal';
+    modal.innerHTML = `
+        <div class="name-modal-content" style="max-width: 500px;">
+            <h2>⚙️ Configuration des Touches</h2>
+            <div style="display: flex; flex-direction: column; gap: 15px; margin: 20px 0;">
+                ${Object.entries(keyBindings).map(([action, keys]) => `
+                    <div style="display: flex; justify-content: space-between; align-items: center; padding: 10px; background: rgba(255,255,255,0.1); border-radius: 5px;">
+                        <span style="font-weight: bold; text-transform: capitalize;">${action}</span>
+                        <button class="key-btn" data-action="${action}" style="padding: 8px 16px; background: #00ff00; border: none; border-radius: 5px; cursor: pointer; font-weight: bold; min-width: 80px;">
+                            ${keys[0].toUpperCase()}
+                        </button>
+                    </div>
+                `).join('')}
+            </div>
+            <button id="close-key-config" class="host-btn primary">Fermer</button>
+            <div id="key-listening" style="display: none; margin-top: 15px; padding: 10px; background: rgba(255,165,0,0.3); border-radius: 5px; text-align: center;">
+                Appuyez sur une touche...
+            </div>
+        </div>
+    `;
+    document.body.appendChild(modal);
+    
+    let listeningForKey = null;
+    
+    modal.querySelectorAll('.key-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+            const action = btn.dataset.action;
+            listeningForKey = { action, btn };
+            document.getElementById('key-listening').style.display = 'block';
+        });
+    });
+    
+    const keyListener = (e) => {
+        if (listeningForKey) {
+            e.preventDefault();
+            const newKey = e.key.toLowerCase();
+            changeKey(listeningForKey.action, newKey);
+            listeningForKey.btn.textContent = newKey.toUpperCase();
+            document.getElementById('key-listening').style.display = 'none';
+            listeningForKey = null;
+        }
+    };
+
+    // Mouse listener while listening: capture mouse button presses
+    const mouseListener = (ev) => {
+        if (!listeningForKey) return;
+        ev.preventDefault();
+        const btnIndex = ev.button; // 0 left, 1 middle, 2 right
+        const mouseKey = 'mouse' + btnIndex;
+        changeKey(listeningForKey.action, mouseKey);
+        listeningForKey.btn.textContent = mouseKey.toUpperCase();
+        document.getElementById('key-listening').style.display = 'none';
+        listeningForKey = null;
+    };
+
+    window.addEventListener('keydown', keyListener);
+    window.addEventListener('mousedown', mouseListener);
+    
+    document.getElementById('close-key-config').addEventListener('click', () => {
+        window.removeEventListener('keydown', keyListener);
+        window.removeEventListener('mousedown', mouseListener);
+        modal.remove();
+    });
+}
+
 // Mise à jour du GUI pour les sprites
 // GUI removed: no runtime import of lil-gui and no GUI controls
 
@@ -1076,7 +1422,7 @@ function checkCollisions(dt) {
             
             // Physique de rebond améliorée
             const restitution = 3.0; // Augmenté de 1.5 à 2.0
-            const separationForce = 8.0; // Augmenté de 3.0 à 5.0
+            const separationForce = 8.0; // Augmentéf de 3.0 à 5.0
             
             const pushForce = collisionVector.clone()
                 .multiplyScalar(impactForce * restitution + separationForce);
@@ -1107,42 +1453,83 @@ function checkCollisions(dt) {
     });
 }
 
-// Vérifier si la voiture est tombée de la plateforme
+// Vérifier si la voiture est tombée ou sort de la zone (avec grace timer)
 function checkFallOffPlatform() {
     if (!car.mesh || car.isDead) return;
-    
+
     const distFromCenter = Math.sqrt(
         car.mesh.position.x * car.mesh.position.x + 
         car.mesh.position.z * car.mesh.position.z
     );
-    
-    // Si tombé en dessous de la plateforme ou hors de la plateforme
-    if (car.mesh.position.y < -5 || distFromCenter > platformRadius) {
-        console.log('Tombé de la plateforme! Vies restantes:', car.lives - 1);
-        
-        // Perdre une vie
+
+    // Immediate fall if way below the platform (ex: huge fall)
+    if (car.mesh.position.y < -5) {
+        console.log('Chute sévère détectée - perte immédiate de vie');
+        applyLifeLoss();
+        return;
+    }
+
+    // Use dynamic zoneRadius for horizontal checks
+    if (distFromCenter > zoneRadius) {
+        // If already pending respawn due to zone exit, ignore further triggers
+        if (ejection.respawnPending) return;
+
+        // Immediate life loss on leaving the zone
+        console.log('Hors de la zone -> mort instantanée');
         car.lives = Math.max(0, car.lives - 1);
         notifyLivesChange(car.lives);
-        
-        // Afficher notification de perte de vie
         showLifeLostNotification();
-        
-        if (car.lives > 0) {
-            // Respawn sur la plateforme
-            const spawn = getRandomSpawnPosition();
-            car.mesh.position.set(spawn.x, spawn.y, spawn.z);
-            car.mesh.rotation.y = spawn.rotY;
-            car.speed = 0;
-            
-            // Effet visuel
-            flashCollisionEffect();
-        } else {
-            // Plus de vies - mode spectateur
+
+        if (car.lives <= 0) {
+            // No lives left -> spectator
             car.isDead = true;
             enterSpectatorMode();
-            notifyFall();
+            notifyFall(); // Only notify fall when truly dead (no lives left)
+            return;
         }
+
+        // Lives remain: set up respawn after respawnDelay
+        ejection.respawnPending = true;
+        ejection.timer = ejection.respawnDelay;
+        if (ejection.uiElem) {
+            ejection.uiElem.style.display = 'block';
+            ejection.uiElem.textContent = `Respawn dans ${ejection.timer.toFixed(1)}s`;
+        }
+
+        // Hide or move the car out of play during respawnPending to avoid further interactions
+        if (car.mesh) {
+            car.mesh.visible = false;
+        }
+        // DON'T notify fall when still alive - server will think we're dead
+    } else {
+        // No action on re-enter: respawnPending controls when the player returns
     }
+}
+
+// Helper to apply life loss and respawn or go spectator
+function applyLifeLoss() {
+    console.log('Tombé de la plateforme! Vies restantes:', car.lives - 1);
+    // This helper is used for immediate fatal falls (y < -5)
+    car.lives = Math.max(0, car.lives - 1);
+    notifyLivesChange(car.lives);
+    showLifeLostNotification();
+
+    if (car.lives <= 0) {
+        car.isDead = true;
+        enterSpectatorMode();
+        notifyFall(); // Only notify when truly dead
+        return;
+    }
+
+    // If lives remain, schedule a respawn after the configured respawnDelay
+    ejection.respawnPending = true;
+    ejection.timer = ejection.respawnDelay;
+    if (ejection.uiElem) {
+        ejection.uiElem.style.display = 'block';
+        ejection.uiElem.textContent = `Respawn dans ${ejection.timer.toFixed(1)}s`;
+    }
+    if (car.mesh) car.mesh.visible = false;
+    // DON'T call notifyFall() here - we're still alive!
 }
 
 // Effet visuel de flash rouge lors d'une collision (DÉSACTIVÉ - trop agressif)
@@ -1631,12 +2018,12 @@ function animate() {
     // Interpolation fluide des joueurs distants
     players.forEach((player, id) => {
         if (player.mesh && player.targetPos) {
-            // Interpolation de position avec prédiction basée sur vélocité
+            // Interpolation de position avec prédiction légère basée sur vélocité
             const predictedPos = player.targetPos.clone()
-                .add(player.velocity.clone().multiplyScalar(dt * 2)); // prédiction 2 frames ahead
+                .add(player.velocity.clone().multiplyScalar(dt * 0.5)); // prédiction réduite pour moins de lag visuel
             
-            // Lerp vers position prédite pour mouvement plus fluide
-            player.mesh.position.lerp(predictedPos, 0.3);
+            // Lerp vers position prédite avec smoothing plus fort
+            player.mesh.position.lerp(predictedPos, 0.15); // réduit de 0.3 à 0.15 pour plus de fluidité
             
             // Interpolation de rotation
             const currentRot = player.mesh.rotation.y;
@@ -1646,7 +2033,7 @@ function animate() {
             if (rotDiff > Math.PI) rotDiff -= Math.PI * 2;
             if (rotDiff < -Math.PI) rotDiff += Math.PI * 2;
             
-            player.mesh.rotation.y += rotDiff * 0.25; // lerp rotation
+            player.mesh.rotation.y += rotDiff * 0.2; // lerp rotation légèrement plus lent
         }
     });
 
@@ -1712,13 +2099,13 @@ function animate() {
     if (car.mesh && !car.isDead && gameState.canPlay) {
         // forward/back
         let forward = 0;
-        if (keys['s'] ) forward += 5;
-        if (keys['z']|| keys['w']) forward -= 5;
+        if (isKeyPressed('backward')) forward += 5;
+        if (isKeyPressed('forward')) forward -= 5;
 
         // turn left/right
         let turn = 0;
-        if (keys['q'] || keys['a']) turn += 1;
-        if (keys['d']) turn -= 1;
+        if (isKeyPressed('left')) turn += 1;
+        if (isKeyPressed('right')) turn -= 1;
         
         // Détecter le premier mouvement pour désactiver l'invulnérabilité
         if ((forward !== 0 || turn !== 0) && !car.hasMovedOnce) {
@@ -1731,18 +2118,18 @@ function animate() {
             car.jumpCooldown -= dt;
         }
         
-        // Jump avec F (avec cooldown)
-        if (keys['f'] && !car.isJumping && car.mesh.position.y <= 0.3 && car.jumpCooldown <= 0) {
+        // Jump (avec cooldown)
+        if (isKeyPressed('jump') && !car.isJumping && car.mesh.position.y <= 0.3 && car.jumpCooldown <= 0) {
             car.isJumping = true;
             car.jumpVelocity = car.jumpForce;
             car.jumpCooldown = car.jumpCooldownTime; // Activer le cooldown
         }
 
-            // boost state (Shift)
-            const boosting = !!keys['shift'];
+            // boost state
+            const boosting = isKeyPressed('boost');
             
-            // Skidding state (Space)
-            const skidding = !car.isJumping && (keys[' '] || keys['space']) && Math.abs(car.speed) > car.skidMinSpeed;
+            // Skidding state
+            const skidding = !car.isJumping && isKeyPressed('drift') && Math.abs(car.speed) > car.skidMinSpeed;
             // energy logic: drain while boosting, regen after delay when not boosting
             if (boosting && car.boostEnergy > 0) {
                 car.boostEnergy = Math.max(0, car.boostEnergy - car.energyDrainRate * dt);
@@ -1826,8 +2213,8 @@ function animate() {
             const rearWorld = rearLocal.applyMatrix4(car.mesh.matrixWorld);
             emitSmokeAt(rearWorld);
         }
-        // emit brake particles at rear lights when braking (S pressed)
-        if (keys['s']) {
+        // emit brake particles at rear lights when braking
+        if (isKeyPressed('backward')) {
             // rear light offsets in local space (left and right) - lowered to taillight height
             const leftRearLocal = new THREE.Vector3(-0.28, 0.08, -1.05);
             const rightRearLocal = new THREE.Vector3(0.28, 0.08, -1.05);
@@ -1981,6 +2368,51 @@ function animate() {
     if (hudBoostFill) {
         const v = Math.max(0, Math.min(1, car.boostEnergy / car.boostMaxEnergy));
         hudBoostFill.style.transform = `scaleX(${v})`;
+    }
+    
+    // Update powerup display
+    updatePowerupDisplay();
+
+    // Handle ejection timer if outside zone
+    // Handle respawnPending countdown (respawn after instant-death by leaving zone)
+    if (ejection.respawnPending) {
+        ejection.timer -= dt;
+        if (ejection.uiElem) {
+            ejection.uiElem.textContent = `Respawn dans ${Math.max(0, ejection.timer).toFixed(1)}s`;
+        }
+        if (ejection.timer <= 0) {
+            // Perform respawn
+            ejection.respawnPending = false;
+            if (ejection.uiElem) {
+                ejection.uiElem.style.display = 'none';
+            }
+            // Respawn the player at a random spawn and reset necessary states
+            const spawn = getRandomSpawnPosition();
+            if (car.mesh) {
+                car.mesh.position.set(spawn.x, spawn.y, spawn.z);
+                car.mesh.rotation.y = spawn.rotY;
+                car.mesh.visible = true;
+            }
+            car.speed = 0;
+            car.knockbackVelocity.set(0, 0, 0);
+            car.isJumping = false;
+            car.isInvulnerable = true;
+            car.invulnerabilityTimer = car.invulnerabilityDuration;
+            // Inform server of current lives (already sent on life loss) but also send state
+            notifyLivesChange(car.lives);
+        }
+    }
+
+    // Zone shrinking disabled: keep static visual
+    if (edge) {
+        edge.scale.set(1, 1, 1);
+    }
+
+    // Update bottom-right boost gauge
+    if (boostBar && boostPct) {
+        const v2 = Math.max(0, Math.min(1, car.boostEnergy / car.boostMaxEnergy));
+        boostBar.style.transform = `scaleX(${v2})`;
+        boostPct.textContent = Math.round(v2 * 100) + '%';
     }
 
     controls.update();
