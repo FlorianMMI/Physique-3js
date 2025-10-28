@@ -108,7 +108,8 @@ export class NetworkClient {
                 rotY,
                 vx,
                 vz,
-                lives: car.lives
+                lives: car.lives,
+                lap: car.currentLap
             };
             
             this.socket.send(JSON.stringify(obj));
@@ -131,6 +132,13 @@ export class NetworkClient {
         if (this.socket?.readyState === WebSocket.OPEN) {
             this.socket.send(JSON.stringify(message));
         }
+    }
+
+    /**
+     * Send message to server (alias for consistency)
+     */
+    sendMessage(message) {
+        this.send(message);
     }
 
     /**

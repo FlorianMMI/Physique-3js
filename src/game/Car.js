@@ -46,6 +46,12 @@ export class Car {
         this.collisionCooldown = 0;
         this.collisionCooldownTime = 0.5;
         
+        // Lap tracking
+        this.currentLap = 0;
+        this.checkpointsCleared = new Set(); // Track which checkpoints have been passed
+        this.lastPosition = new THREE.Vector3(); // For checkpoint crossing detection
+        this.totalCheckpoints = 4; // Should match track's numCheckpoints
+        
         // For remote players - interpolation
         this.targetPos = new THREE.Vector3();
         this.targetRot = 0;
@@ -127,13 +133,16 @@ export class Car {
         if (this.mesh) {
             this.mesh.position.set(x, y, z);
             this.mesh.rotation.y = rotY;
+            this.lastPosition.set(x, y, z);
         } else if (this.placeholder) {
             this.placeholder.position.set(x, y, z);
             this.placeholder.rotation.y = rotY;
+            this.lastPosition.set(x, y, z);
         }
         this.speed = 0;
         this.lives = this.maxLives;
         this.isDead = false;
+        this.resetLapProgress();
     }
 
     /**
@@ -316,6 +325,41 @@ export class Car {
             this.isDead = true;
         }
         return this.lives;
+    }
+
+    /**
+     * Pass through a checkpoint
+     */
+    passCheckpoint(checkpointId) {
+        this.checkpointsCleared.add(checkpointId);
+    }
+
+    /**
+     * Check if all checkpoints have been cleared
+     */
+    allCheckpointsCleared() {
+        return this.checkpointsCleared.size >= this.totalCheckpoints;
+    }
+
+    /**
+     * Complete a lap
+     */
+    completeLap() {
+        if (this.allCheckpointsCleared()) {
+            this.currentLap++;
+            this.checkpointsCleared.clear();
+            console.log(`Lap ${this.currentLap} completed!`);
+            return true;
+        }
+        return false;
+    }
+
+    /**
+     * Reset lap progress
+     */
+    resetLapProgress() {
+        this.currentLap = 0;
+        this.checkpointsCleared.clear();
     }
 
     /**

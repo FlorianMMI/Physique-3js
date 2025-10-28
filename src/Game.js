@@ -20,7 +20,9 @@ export class Game {
         
         // Game state
         this.gameState = new GameState();
-        this.gameState.platformRadius = this.sceneManager.getPlatformRadius();
+        
+        // Set track reference in game state for spawning
+        this.gameState.setTrack(this.sceneManager.getTrack());
         
         // Systems
         this.particles = new ParticleSystem(this.sceneManager.getScene());
@@ -159,6 +161,9 @@ export class Game {
                 player.lives = msg.lives;
                 player.isDead = msg.lives <= 0;
             }
+            if (msg.lap !== undefined) {
+                player.currentLap = msg.lap;
+            }
         }
     }
 
@@ -272,9 +277,10 @@ export class Game {
                     .subVectors(player.mesh.position, this.localCar.mesh.position)
                     .normalize();
                 
-                const impactForce = Math.abs(this.localCar.speed) * 0.035;
-                const restitution = 1.2;
-                const separationForce = 2.5;
+                // Reduced collision forces for racetrack gameplay
+                const impactForce = Math.abs(this.localCar.speed) * 0.015; // Reduced from 0.035
+                const restitution = 0.6; // Reduced from 1.2
+                const separationForce = 1.0; // Reduced from 2.5
                 
                 // Send collision to server
                 this.network.sendCollisionPush(
@@ -284,8 +290,8 @@ export class Game {
                     collisionVector.z * (impactForce * restitution + separationForce)
                 );
                 
-                // Reduce local car speed
-                this.localCar.speed *= 0.85;
+                // Reduce local car speed (less aggressive)
+                this.localCar.speed *= 0.92; // Changed from 0.85
                 
                 // Emit explosion particles
                 const impactPoint = new THREE.Vector3()
@@ -300,8 +306,11 @@ export class Game {
 
     /**
      * Check if car fell off platform
+     * TEMPORARILY DISABLED for racetrack implementation
      */
     _checkFallOff() {
+        // Disabled for now - will be reimplemented with track boundaries later
+        /* 
         if (!this.localCar.mesh || this.localCar.isDead) return;
         
         const pos = this.localCar.mesh.position;
@@ -325,6 +334,133 @@ export class Game {
                 this.network.notifyFall();
             }
         }
+        */
+    }
+
+    /**
+     * Check collisions with track walls
+     */
+    _checkWallCollisions() {
+        if (!this.localCar.mesh || this.localCar.isDead) return;
+        
+        const track = this.sceneManager.getTrack();
+        if (!track) return;
+
+        const collision = track.checkWallCollision(this.localCar.mesh.position);
+        
+        if (collision) {
+            // Push car back onto track
+            const pushStrength = Math.min(collision.penetrationDepth, 0.5);
+            this.localCar.mesh.position.add(
+                collision.correctionVector.multiplyScalar(pushStrength)
+            );
+            
+            // Reduce speed by 30%
+            this.localCar.speed *= 0.7;
+            
+            // Turn the car away from the wall
+            // Calculate the direction we want the car to face (along the correction vector)
+            const desiredDirection = collision.correctionVector.clone();
+            const currentRotation = this.localCar.mesh.rotation.y;
+            const targetRotation = Math.atan2(desiredDirection.x, desiredDirection.z);
+            
+            // Calculate shortest rotation difference
+            let rotationDiff = targetRotation - currentRotation;
+            // Normalize to -PI to PI range
+            while (rotationDiff > Math.PI) rotationDiff -= Math.PI * 2;
+            while (rotationDiff < -Math.PI) rotationDiff += Math.PI * 2;
+            
+            // Apply partial rotation toward the correction direction (smoother turning)
+            const turnStrength = 0.15; // Turn 15% toward the correct direction per frame
+            this.localCar.mesh.rotation.y += rotationDiff * turnStrength;
+            
+            // Emit particles on harder impacts
+            if (Math.abs(this.localCar.speed) > 10) {
+                this.particles.emitExplosion(this.localCar.mesh.position.clone());
+            }
+        }
+    }
+
+    /**
+     * Check if car passes through checkpoints and finish line
+     */
+    _checkCheckpoints() {
+        if (!this.localCar.mesh || this.localCar.isDead) return;
+        
+        const track = this.sceneManager.getTrack();
+        if (!track) return;
+
+        const currentPos = this.localCar.mesh.position.clone();
+        const lastPos = this.localCar.lastPosition;
+        
+        // Check each checkpoint
+        for (let i = 0; i < track.checkpoints.length; i++) {
+            if (!this.localCar.checkpointsCleared.has(i)) {
+                const checkpoint = track.checkCheckpoint(lastPos, currentPos, i);
+                if (checkpoint) {
+                    this.localCar.passCheckpoint(i);
+                    console.log(`Checkpoint ${i + 1}/${track.checkpoints.length} passed`);
+                    
+                    // Send checkpoint update to server
+                    this.network.sendMessage({
+                        type: 'checkpoint',
+                        checkpointId: i
+                    });
+                }
+            }
+        }
+        
+        // Check finish line (only if all checkpoints are cleared)
+        if (this.localCar.allCheckpointsCleared()) {
+            const crossedFinish = track.checkFinishLine(lastPos, currentPos);
+            if (crossedFinish) {
+                const lapCompleted = this.localCar.completeLap();
+                if (lapCompleted) {
+                    console.log(`🏁 Lap ${this.localCar.currentLap} completed!`);
+                    
+                    // Send lap completion to server
+                    this.network.sendMessage({
+                        type: 'lap_complete',
+                        lap: this.localCar.currentLap
+                    });
+                    
+                    // Show UI feedback
+                    this.ui.showLapComplete(this.localCar.currentLap);
+                }
+            }
+        }
+        
+        // Update last position for next frame
+        this.localCar.lastPosition.copy(currentPos);
+    }
+
+    /**
+     * Update leaderboard with all players' lap data
+     */
+    _updateLeaderboard() {
+        const players = [];
+        
+        // Add local player
+        if (this.localCar) {
+            players.push({
+                id: this.gameState.localId,
+                name: 'You',
+                laps: this.localCar.currentLap,
+                isLocal: true
+            });
+        }
+        
+        // Add remote players
+        this.remotePlayers.forEach((player, id) => {
+            players.push({
+                id: id,
+                name: null,
+                laps: player.currentLap || 0,
+                isLocal: false
+            });
+        });
+        
+        this.ui.updateLeaderboard(players);
     }
 
     /**
@@ -379,6 +515,12 @@ export class Game {
         // Check collisions
         this._checkCollisions(dt);
         
+        // Check wall collisions
+        this._checkWallCollisions();
+        
+        // Check checkpoints and finish line
+        this._checkCheckpoints();
+        
         // Check if fell off platform
         this._checkFallOff();
         
@@ -405,7 +547,11 @@ export class Game {
         // Update UI
         this.ui.updateLives(this.localCar.lives, this.localCar.maxLives);
         this.ui.updateBoost(this.localCar.boostEnergy, this.localCar.boostMaxEnergy);
+        this.ui.updateLap(this.localCar.currentLap);
         this.ui.updateParticleCount(this.particles.getParticleCount());
+        
+        // Update leaderboard
+        this._updateLeaderboard();
         
         // Render
         this.renderer.render(this.sceneManager.getScene(), this.camera.getCamera());
