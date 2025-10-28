@@ -194,6 +194,13 @@ export class Game {
      */
     _handleGameRestart(msg) {
         console.log('Game restarting!');
+        
+        // Regenerate track with new layout
+        this.sceneManager.regenerateTrack();
+        
+        // Update game state with new track
+        this.gameState.setTrack(this.sceneManager.getTrack());
+        
         this.gameState.reset();
         this.gameState.setCanPlay(true);
         
@@ -205,6 +212,7 @@ export class Game {
         this.remotePlayers.forEach((player) => {
             player.lives = 3;
             player.isDead = false;
+            player.resetLapProgress();
         });
         
         // Re-enable camera follow

@@ -47,6 +47,18 @@ export class SceneManager {
         this.scene.remove(object);
     }
 
+    /**
+     * Regenerate the track with a new random layout
+     */
+    regenerateTrack() {
+        if (this.track) {
+            this.track.destroy();
+            this.track = null;
+        }
+        this._setupTrack();
+        console.log('Track regenerated with new layout');
+    }
+
     getTrack() {
         return this.track;
     }

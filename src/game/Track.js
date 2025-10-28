@@ -10,8 +10,8 @@ export class Track {
         this.scene = scene;
         
         // Track configuration
-        this.trackWidth = 10; // Width of the racing track
-        this.wallHeight = 2; // Height of the track walls
+        this.trackWidth = 12; // Width of the racing track (increased for larger track)
+        this.wallHeight = 1.2; // Height of the track walls (reduced for better visibility)
         this.skeletonPoints = []; // Array of Vector3 points defining the centerline
         
         // Track meshes
@@ -34,23 +34,74 @@ export class Track {
 
     /**
      * Generate the skeleton path for the track
-     * For now, creates a simple circle
+     * Creates a circular base with radius variation for interesting turns
      */
     _generateSkeleton() {
         this.skeletonPoints = [];
         
-        const radius = 50; // Radius of the circular track
+        const baseRadius = 70; // Base radius of the track (increased for longer track)
         const segments = 64; // Number of points in the circle
+        const radiusVariation = 0.3; // How much the radius can vary (0.3 = 30%)
+        const smoothing = 0.6; // How much to smooth out sharp changes (0-1, higher = smoother)
         
+        // Generate random radius multipliers for each segment
+        const radiusMultipliers = [];
+        for (let i = 0; i < segments; i++) {
+            // Calculate distance from finish line (segment 0)
+            // Distance wraps around the circle
+            const distanceFromStart = Math.min(i, segments - i);
+            const startStraightLength = 8; // Number of segments to keep straighter near start
+            
+            // Reduce variation near the start/finish line
+            let localVariation = radiusVariation;
+            if (distanceFromStart < startStraightLength) {
+                // Gradually reduce variation from 0% at start to 100% at startStraightLength
+                const variationMultiplier = distanceFromStart / startStraightLength;
+                localVariation = radiusVariation * variationMultiplier;
+            }
+            
+            // Random variation between (1 - localVariation) and (1 + localVariation)
+            const randomMultiplier = 1 + (Math.random() * 2 - 1) * localVariation;
+            radiusMultipliers.push(randomMultiplier);
+        }
+        
+        // Smooth the multipliers to avoid sharp transitions
+        const smoothedMultipliers = [];
+        for (let i = 0; i < segments; i++) {
+            const prev = radiusMultipliers[(i - 1 + segments) % segments];
+            const curr = radiusMultipliers[i];
+            const next = radiusMultipliers[(i + 1) % segments];
+            
+            // Weighted average for smoothing
+            const smoothed = prev * smoothing * 0.5 + 
+                           curr * (1 - smoothing) + 
+                           next * smoothing * 0.5;
+            smoothedMultipliers.push(smoothed);
+        }
+        
+        // Apply one more pass of smoothing for even better results
+        const finalMultipliers = [];
+        for (let i = 0; i < segments; i++) {
+            const prev = smoothedMultipliers[(i - 1 + segments) % segments];
+            const curr = smoothedMultipliers[i];
+            const next = smoothedMultipliers[(i + 1) % segments];
+            
+            const smoothed = prev * 0.25 + curr * 0.5 + next * 0.25;
+            finalMultipliers.push(smoothed);
+        }
+        
+        // Generate points with varied radius
         for (let i = 0; i < segments; i++) {
             const angle = (i / segments) * Math.PI * 2;
+            const radius = baseRadius * finalMultipliers[i];
+            
             const x = Math.cos(angle) * radius;
             const z = Math.sin(angle) * radius;
             
             this.skeletonPoints.push(new THREE.Vector3(x, 0, z));
         }
         
-        console.log(`Track skeleton generated with ${this.skeletonPoints.length} points`);
+        console.log(`Track skeleton generated with ${this.skeletonPoints.length} points (varied radius)`);
     }
 
     /**
