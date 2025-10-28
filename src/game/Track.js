@@ -582,7 +582,8 @@ export class Track {
 
         // Calculate distance from track center
         const halfWidth = this.trackWidth / 2;
-        const maxDistance = halfWidth - 0.5; // Leave some margin from the wall
+        const carRadius = 1.0; // Approximate car size
+        const maxDistance = halfWidth - carRadius; // More aggressive boundary check
 
         if (closestDistance > maxDistance) {
             // Outside track boundaries

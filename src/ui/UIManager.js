@@ -60,6 +60,24 @@ export class UIManager {
         document.body.appendChild(this.leaderboard);
 
         this.hudElements.leaderboardContent = document.getElementById('leaderboard-content');
+        
+        // Create speedometer
+        this._createSpeedometer();
+    }
+
+    /**
+     * Create speedometer UI
+     */
+    _createSpeedometer() {
+        this.speedometer = document.createElement('div');
+        this.speedometer.className = 'speedometer';
+        this.speedometer.innerHTML = `
+            <div class="speedometer-value" id="speedometer-value">0</div>
+            <div class="speedometer-label">KM/H</div>
+        `;
+        document.body.appendChild(this.speedometer);
+
+        this.hudElements.speedometerValue = document.getElementById('speedometer-value');
     }
 
     /**
@@ -89,6 +107,18 @@ export class UIManager {
     updateParticleCount(count) {
         if (this.hudElements.particles) {
             this.hudElements.particles.textContent = count;
+        }
+    }
+
+    /**
+     * Update speedometer
+     */
+    updateSpeed(speed) {
+        if (this.hudElements.speedometerValue) {
+            // Scale speed: 250 real units = 100 km/h displayed
+            const speedScale = 100 / 250; // 0.4
+            const displaySpeed = Math.round(Math.abs(speed) * speedScale);
+            this.hudElements.speedometerValue.textContent = displaySpeed;
         }
     }
 

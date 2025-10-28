@@ -15,11 +15,12 @@ export class Car {
         
         // Physics properties
         this.speed = 0;
-        this.maxSpeed = 190;
+        this.maxSpeed = 250; // Increased from 190
         this.accel = 20;
-        this.baseMaxSpeed = 190;
+        this.baseMaxSpeed = 250; // Increased from 190
         this.baseAccel = 20;
-        this.turnSpeed = Math.PI * 0.6; // rad/s
+        this.turnSpeed = Math.PI * 0.5; // Slightly increased from 0.45 for better turning
+        this.turnSpeedPenalty = 0.998; // Speed multiplier when turning (99.8% - much less harsh)
         
         // Boost configuration
         this.boostMultiplier = 2.0;
@@ -158,7 +159,7 @@ export class Car {
 
         // Input processing
         let forward = 0;
-        if (this.keys['s']) forward += 5;
+        if (this.keys['s']) forward += 8; // Increased from 5 for stronger braking
         if (this.keys['z'] || this.keys['w']) forward -= 5;
 
         let turn = 0;
@@ -189,7 +190,10 @@ export class Car {
         if (forward !== 0) {
             this.speed += forward * effectiveAccel * dt;
         } else {
-            this.speed *= Math.max(0, 1 - 4 * dt);
+            // Much lower natural deceleration for better throttle management
+            // Old: 4 * dt (loses ~98% speed per second)
+            // New: 0.5 * dt (loses ~39% speed per second)
+            this.speed *= Math.max(0, 1 - 0.5 * dt);
         }
         this.speed = Math.max(-effectiveMaxSpeed, Math.min(effectiveMaxSpeed, this.speed));
 
@@ -198,8 +202,27 @@ export class Car {
         const skidding = !!(this.keys[' '] || this.keys['space']);
         const turnFactor = skidding ? 1.25 : 1.0;
         
+        // Speed-dependent turning: faster = wider turn radius (less turning)
+        // At low speeds (0-50): full turning ability
+        // At high speeds (200+): reduced turning (~40% of normal)
+        const speedRatio = Math.abs(this.speed) / this.maxSpeed;
+        const speedTurnMultiplier = 1.0 - (speedRatio * 0.6); // Reduces to 40% at max speed
+        
         let deltaYaw = turn * this.turnSpeed * dt * 
-                       (Math.abs(this.speed) / this.maxSpeed) * turnFactor;
+                       (Math.abs(this.speed) / this.maxSpeed) * 
+                       turnFactor * 
+                       speedTurnMultiplier; // Apply speed-dependent reduction
+        
+        // Apply speed penalty when turning (much lighter now)
+        if (Math.abs(turn) > 0.01 && Math.abs(this.speed) > 5) {
+            if (skidding) {
+                // Drifting causes more speed loss than regular turning
+                // Regular turn: 0.2% loss, Drift: 1.5% loss
+                this.speed *= 0.985;
+            } else {
+                this.speed *= this.turnSpeedPenalty;
+            }
+        }
         
         // Skid mechanics
         if (skidding && Math.abs(turn) > 0.01 && Math.abs(this.speed) > this.skidMinSpeed) {

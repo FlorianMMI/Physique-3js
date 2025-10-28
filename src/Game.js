@@ -357,8 +357,8 @@ export class Game {
         const collision = track.checkWallCollision(this.localCar.mesh.position);
         
         if (collision) {
-            // Push car back onto track
-            const pushStrength = Math.min(collision.penetrationDepth, 0.5);
+            // More aggressive push to prevent clipping
+            const pushStrength = Math.min(collision.penetrationDepth * 1.5, 1.0);
             this.localCar.mesh.position.add(
                 collision.correctionVector.multiplyScalar(pushStrength)
             );
@@ -378,8 +378,8 @@ export class Game {
             while (rotationDiff > Math.PI) rotationDiff -= Math.PI * 2;
             while (rotationDiff < -Math.PI) rotationDiff += Math.PI * 2;
             
-            // Apply partial rotation toward the correction direction (smoother turning)
-            const turnStrength = 0.15; // Turn 15% toward the correct direction per frame
+            // Apply stronger rotation toward the correction direction
+            const turnStrength = 0.2; // Increased from 0.15 for more aggressive turning
             this.localCar.mesh.rotation.y += rotationDiff * turnStrength;
             
             // Emit particles on harder impacts
@@ -556,6 +556,7 @@ export class Game {
         this.ui.updateLives(this.localCar.lives, this.localCar.maxLives);
         this.ui.updateBoost(this.localCar.boostEnergy, this.localCar.boostMaxEnergy);
         this.ui.updateLap(this.localCar.currentLap);
+        this.ui.updateSpeed(this.localCar.speed);
         this.ui.updateParticleCount(this.particles.getParticleCount());
         
         // Update leaderboard
