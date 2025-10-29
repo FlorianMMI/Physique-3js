@@ -199,6 +199,11 @@ export class Game {
             const pushForce = new THREE.Vector3(msg.forceX || 0, msg.forceY || 0, msg.forceZ || 0);
             this.localCar.mesh.position.add(pushForce);
             this.localCar.speed *= 0.5;
+            
+            // Apply camera tilt when receiving collision push from server
+            const pushDirection = pushForce.clone().normalize();
+            const pushIntensity = Math.min(pushForce.length() * 0.2, 1.0);
+            this.camera.applyImpactTilt(pushDirection, pushIntensity);
         }
     }
 
@@ -317,6 +322,10 @@ export class Game {
                 // Play impact sound based on collision intensity
                 const speedRatio = Math.abs(this.localCar.speed) / this.localCar.maxSpeed;
                 this.sound.playImpact(speedRatio);
+                
+                // Apply camera tilt based on collision direction
+                const impactIntensity = Math.min(speedRatio, 1.0);
+                this.camera.applyImpactTilt(collisionVector, impactIntensity);
                 
                 // Emit explosion particles
                 const impactPoint = new THREE.Vector3()
@@ -598,7 +607,11 @@ export class Game {
         
         // Update camera
         if (!this.localCar.isDead) {
-            this.camera.follow(this.localCar.getActiveMesh());
+            this.camera.follow(
+                this.localCar.getActiveMesh(), 
+                this.localCar.speed,
+                this.localCar.angularVelocity
+            );
         }
         this.camera.update();
         

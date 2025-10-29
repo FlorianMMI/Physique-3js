@@ -11,7 +11,7 @@ export class Track {
         
         // Track configuration
         this.trackWidth = 12; // Width of the racing track (increased for larger track)
-        this.wallHeight = 1.2; // Height of the track walls (reduced for better visibility)
+        this.wallHeight = 0.6; // Height of the track walls (reduced for better visibility)
         this.skeletonPoints = []; // Array of Vector3 points defining the centerline
         
         // Track meshes

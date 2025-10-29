@@ -58,6 +58,9 @@ export class Car {
         this.targetRot = 0;
         this.velocity = new THREE.Vector3();
         
+        // Angular velocity for camera effects
+        this.angularVelocity = 0;
+        
         // Color
         this.color = new THREE.Color().setHSL(Math.random(), 0.8, 0.5);
         
@@ -242,6 +245,16 @@ export class Car {
         }
         
         this.mesh.rotation.y += deltaYaw;
+        
+        // Track angular velocity for camera effects (normalized to -1 to 1)
+        // Only set if there's actual turning happening
+        if (Math.abs(turn) > 0.01 && dt > 0) {
+            const rawAngularVelocity = deltaYaw / (this.turnSpeed * dt);
+            this.angularVelocity = THREE.MathUtils.clamp(rawAngularVelocity, -1, 1);
+        } else {
+            // Reset angular velocity when not turning
+            this.angularVelocity = 0;
+        }
 
         // Move forward
         const forwardVec = new THREE.Vector3(0, 0, -1)
