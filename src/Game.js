@@ -57,6 +57,12 @@ export class Game {
             this.ui.showNowPlaying(trackName);
         });
         
+        // Initialize minimap with track data
+        const track = this.sceneManager.getTrack();
+        if (track && track.skeletonPoints) {
+            this.ui.initMinimap(track.skeletonPoints);
+        }
+        
         // Create local car
         this.localCar = new Car(this.sceneManager.getScene(), true);
         
@@ -218,6 +224,12 @@ export class Game {
         
         // Update game state with new track
         this.gameState.setTrack(this.sceneManager.getTrack());
+        
+        // Reinitialize minimap with new track
+        const track = this.sceneManager.getTrack();
+        if (track && track.skeletonPoints) {
+            this.ui.initMinimap(track.skeletonPoints);
+        }
         
         this.gameState.reset();
         this.gameState.setCanPlay(true);
@@ -507,6 +519,43 @@ export class Game {
     }
 
     /**
+     * Update minimap with all players' positions
+     */
+    _updateMinimap() {
+        const players = [];
+        
+        // Add local player
+        if (this.localCar && this.localCar.mesh) {
+            players.push({
+                position: {
+                    x: this.localCar.mesh.position.x,
+                    z: this.localCar.mesh.position.z
+                },
+                rotation: this.localCar.mesh.rotation.y,
+                color: '#' + this.localCar.color.getHexString(),
+                isLocal: true
+            });
+        }
+        
+        // Add remote players
+        this.remotePlayers.forEach((player, id) => {
+            if (player.mesh) {
+                players.push({
+                    position: {
+                        x: player.mesh.position.x,
+                        z: player.mesh.position.z
+                    },
+                    rotation: player.mesh.rotation.y,
+                    color: '#' + player.color.getHexString(),
+                    isLocal: false
+                });
+            }
+        });
+        
+        this.ui.updateMinimap(players);
+    }
+
+    /**
      * Emit particles based on car actions
      */
     _emitCarParticles(actions) {
@@ -624,6 +673,9 @@ export class Game {
         
         // Update leaderboard
         this._updateLeaderboard();
+        
+        // Update minimap
+        this._updateMinimap();
         
         // Render
         this.renderer.render(this.sceneManager.getScene(), this.camera.getCamera());
