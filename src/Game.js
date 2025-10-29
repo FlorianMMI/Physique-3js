@@ -52,6 +52,11 @@ export class Game {
         // Initialize sound system
         await this.sound.init(this.camera.getCamera());
         
+        // Set up track change callback for UI
+        this.sound.setTrackChangeCallback((trackName) => {
+            this.ui.showNowPlaying(trackName);
+        });
+        
         // Create local car
         this.localCar = new Car(this.sceneManager.getScene(), true);
         

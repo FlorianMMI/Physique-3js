@@ -12,6 +12,7 @@ export class SoundManager {
         this.skidSound = null;
         this.impact1Sound = null;
         this.impact2Sound = null;
+        this.currentMusicSound = null;
         this.initialized = false;
         
         // Audio settings
@@ -31,6 +32,20 @@ export class SoundManager {
         // Impact cooldown to prevent sound spam
         this.impactCooldown = 0;
         this.impactCooldownTime = 0.3; // seconds
+        
+        // Background music
+        this.musicTracks = [
+            'sounds/music/BORN TO RACE - PXRKX.mp3',
+            'sounds/music/GROUP B - ANGXL.mp3',
+            'sounds/music/MARLBORO CLUB - PXRKX.mp3',
+            'sounds/music/RACING - PXRKX.mp3',
+            'sounds/music/Rally House - valtis.mp3',
+            'sounds/music/SUBXRU CLXB - Subaru Playa.mp3'
+        ];
+        this.musicBuffers = new Map();
+        this.playedTracks = [];
+        this.currentTrackIndex = -1;
+        this.onTrackChange = null; // Callback for UI updates
         
         // State tracking
         this.isSkidding = false;
@@ -91,6 +106,18 @@ export class SoundManager {
             this.impact2Sound.setLoop(false);
             this.impact2Sound.setVolume(0.6);
 
+            // Load all music tracks
+            console.log('Loading music tracks...');
+            for (const trackPath of this.musicTracks) {
+                try {
+                    const buffer = await this._loadAudio(loader, trackPath);
+                    this.musicBuffers.set(trackPath, buffer);
+                    console.log(`Loaded: ${this._getTrackName(trackPath)}`);
+                } catch (err) {
+                    console.error(`Failed to load music: ${trackPath}`, err);
+                }
+            }
+
             this.initialized = true;
             console.log('Sound system initialized');
         } catch (error) {
@@ -113,6 +140,93 @@ export class SoundManager {
     }
 
     /**
+     * Extract track name from file path
+     */
+    _getTrackName(trackPath) {
+        const fileName = trackPath.split('/').pop();
+        return fileName.replace('.mp3', '').replace('.ogg', '').replace('.wav', '');
+    }
+
+    /**
+     * Play next random music track (avoiding repeats until all played)
+     */
+    _playNextTrack() {
+        if (!this.initialized || this.musicBuffers.size === 0) return;
+
+        // If we've played all tracks, reset the list
+        if (this.playedTracks.length >= this.musicTracks.length) {
+            this.playedTracks = [];
+        }
+
+        // Find tracks that haven't been played yet
+        const availableTracks = this.musicTracks.filter(
+            track => !this.playedTracks.includes(track)
+        );
+
+        if (availableTracks.length === 0) return;
+
+        // Pick a random track from available ones
+        const randomTrack = availableTracks[Math.floor(Math.random() * availableTracks.length)];
+        this.playedTracks.push(randomTrack);
+
+        // Stop current music if playing
+        if (this.currentMusicSound && this.currentMusicSound.isPlaying) {
+            this.currentMusicSound.stop();
+        }
+
+        // Create new audio instance
+        this.currentMusicSound = new THREE.Audio(this.listener);
+        const buffer = this.musicBuffers.get(randomTrack);
+        if (buffer) {
+            this.currentMusicSound.setBuffer(buffer);
+            this.currentMusicSound.setLoop(false);
+            this.currentMusicSound.setVolume(0.20); // Keep it quiet so it doesn't drown out SFX
+            
+            // Play and set up ended listener
+            this.currentMusicSound.play();
+            
+            // Set up ended listener on the source for next track
+            if (this.currentMusicSound.source) {
+                this.currentMusicSound.source.onended = () => {
+                    console.log('Track ended, playing next...');
+                    this._playNextTrack();
+                };
+            }
+
+            // Notify UI about track change
+            const trackName = this._getTrackName(randomTrack);
+            console.log(`Now playing: ${trackName}`);
+            if (this.onTrackChange) {
+                this.onTrackChange(trackName);
+            }
+        }
+    }
+
+    /**
+     * Start background music
+     */
+    startMusic() {
+        if (!this.initialized) return;
+        this._playNextTrack();
+    }
+
+    /**
+     * Stop background music
+     */
+    stopMusic() {
+        if (this.currentMusicSound && this.currentMusicSound.isPlaying) {
+            this.currentMusicSound.stop();
+        }
+    }
+
+    /**
+     * Set callback for track changes
+     */
+    setTrackChangeCallback(callback) {
+        this.onTrackChange = callback;
+    }
+
+    /**
      * Start playing engine sounds
      */
     start() {
@@ -130,6 +244,9 @@ export class SoundManager {
         if (this.skidSound && !this.skidSound.isPlaying) {
             this.skidSound.play();
         }
+        
+        // Start background music when game starts
+        this.startMusic();
     }
 
     /**
@@ -283,6 +400,7 @@ export class SoundManager {
         if (this.skidSound && this.skidSound.isPlaying) {
             this.skidSound.stop();
         }
+        // Don't stop music when game stops, keep it playing
     }
 
     /**
