@@ -7,6 +7,7 @@ import { GameState } from './game/GameState.js';
 import { ParticleSystem } from './particles/ParticleSystem.js';
 import { NetworkClient } from './network/NetworkClient.js';
 import { UIManager } from './ui/UIManager.js';
+import { SoundManager } from './audio/SoundManager.js';
 
 /**
  * Game - Main game coordinator
@@ -28,6 +29,7 @@ export class Game {
         this.particles = new ParticleSystem(this.sceneManager.getScene());
         this.network = new NetworkClient(this.gameState);
         this.ui = new UIManager(this.gameState);
+        this.sound = new SoundManager();
         
         // Players
         this.localCar = null;
@@ -37,6 +39,9 @@ export class Game {
         // Timing
         this.prevTime = performance.now();
         
+        // Sound state tracking
+        this.soundStarted = false;
+        
         this._setupNetworkHandlers();
     }
 
@@ -44,6 +49,14 @@ export class Game {
      * Initialize and start the game
      */
     async init() {
+        // Initialize sound system
+        await this.sound.init(this.camera.getCamera());
+        
+        // Set up track change callback for UI
+        this.sound.setTrackChangeCallback((trackName) => {
+            this.ui.showNowPlaying(trackName);
+        });
+        
         // Create local car
         this.localCar = new Car(this.sceneManager.getScene(), true);
         
@@ -301,6 +314,10 @@ export class Game {
                 // Reduce local car speed (less aggressive)
                 this.localCar.speed *= 0.92; // Changed from 0.85
                 
+                // Play impact sound based on collision intensity
+                const speedRatio = Math.abs(this.localCar.speed) / this.localCar.maxSpeed;
+                this.sound.playImpact(speedRatio);
+                
                 // Emit explosion particles
                 const impactPoint = new THREE.Vector3()
                     .addVectors(this.localCar.mesh.position, player.mesh.position)
@@ -363,8 +380,17 @@ export class Game {
                 collision.correctionVector.multiplyScalar(pushStrength)
             );
             
+            // Calculate impact intensity for sound
+            const speedBeforeImpact = Math.abs(this.localCar.speed);
+            
             // Reduce speed by 30%
             this.localCar.speed *= 0.7;
+            
+            // Play impact sound if speed is significant
+            if (speedBeforeImpact > 10) {
+                const speedRatio = speedBeforeImpact / this.localCar.maxSpeed;
+                this.sound.playImpact(speedRatio);
+            }
             
             // Turn the car away from the wall
             // Calculate the direction we want the car to face (along the correction vector)
@@ -537,6 +563,30 @@ export class Game {
                        this.gameState.isGameActive && 
                        this.gameState.canPlay;
         const actions = this.localCar.updatePhysics(dt, canMove);
+        
+        // Start sound when game becomes active
+        if (this.gameState.isGameActive && !this.soundStarted) {
+            this.sound.start();
+            this.soundStarted = true;
+        } else if (!this.gameState.isGameActive && this.soundStarted) {
+            this.sound.stop();
+            this.soundStarted = false;
+        }
+        
+        // Update sound system
+        if (canMove) {
+            const isAccelerating = actions && (actions.forward < 0 || actions.boosting);
+            const isBoosting = actions && actions.boosting;
+            const isSkidding = actions && actions.skidding;
+            this.sound.update(
+                this.localCar.speed, 
+                this.localCar.maxSpeed, 
+                isAccelerating,
+                isBoosting,
+                isSkidding,
+                dt
+            );
+        }
         
         // Emit particles based on car actions
         if (canMove) {

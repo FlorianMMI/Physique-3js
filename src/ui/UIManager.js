@@ -43,8 +43,26 @@ export class UIManager {
         this.hudElements.particles = document.getElementById('hud-particles');
         this.hudElements.lap = document.getElementById('hud-lap');
 
+        // Create now playing notification
+        this._createNowPlaying();
+
         // Create leaderboard
         this._createLeaderboard();
+    }
+
+    /**
+     * Create now playing notification
+     */
+    _createNowPlaying() {
+        this.nowPlaying = document.createElement('div');
+        this.nowPlaying.className = 'now-playing';
+        this.nowPlaying.innerHTML = `
+            <div class="now-playing-label">♪ Musique en cours</div>
+            <div class="now-playing-track" id="now-playing-track"></div>
+        `;
+        document.body.appendChild(this.nowPlaying);
+        this.hudElements.nowPlayingTrack = document.getElementById('now-playing-track');
+        this.nowPlayingTimeout = null;
     }
 
     /**
@@ -360,5 +378,26 @@ export class UIManager {
     clearMessages() {
         this._removeGameMessage();
         this.removeSpectatorMessage();
+    }
+
+    /**
+     * Show now playing notification
+     */
+    showNowPlaying(trackName) {
+        if (!this.hudElements.nowPlayingTrack || !this.nowPlaying) return;
+
+        // Clear existing timeout
+        if (this.nowPlayingTimeout) {
+            clearTimeout(this.nowPlayingTimeout);
+        }
+
+        // Update track name and show
+        this.hudElements.nowPlayingTrack.textContent = trackName;
+        this.nowPlaying.classList.add('show');
+
+        // Hide after 3 seconds
+        this.nowPlayingTimeout = setTimeout(() => {
+            this.nowPlaying.classList.remove('show');
+        }, 3000);
     }
 }

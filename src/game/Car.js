@@ -331,8 +331,9 @@ export class Car {
      */
     getSkidPositions() {
         if (!this.mesh) return null;
-        const leftLocal = new THREE.Vector3(-0.28, 0.02, -1.05);
-        const rightLocal = new THREE.Vector3(0.28, 0.02, -1.05);
+        // Increased horizontal spacing to match tire positions
+        const leftLocal = new THREE.Vector3(-0.55, 0.02, -1.05);
+        const rightLocal = new THREE.Vector3(0.55, 0.02, -1.05);
         return {
             left: leftLocal.applyMatrix4(this.mesh.matrixWorld),
             right: rightLocal.applyMatrix4(this.mesh.matrixWorld)
