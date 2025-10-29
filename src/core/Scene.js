@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { Track } from '../game/Track.js';
 
 /**
  * SceneManager - Manages the Three.js scene and all static environment objects
@@ -8,42 +9,17 @@ export class SceneManager {
         this.scene = new THREE.Scene();
         this.scene.background = new THREE.Color(0x87ceeb); // Sky blue
         
-        this.platformRadius = 40;
-        this.platform = null;
-        this.edge = null;
+        // Track (replaces old circular platform)
+        this.track = null;
         
-        this._setupPlatform();
+        this._setupTrack();
         this._setupLights();
     }
 
-    _setupPlatform() {
-        // Create circular platform
-        const platformGeometry = new THREE.CylinderGeometry(
-            this.platformRadius, 
-            this.platformRadius, 
-            2, 
-            32
-        );
-        const platformMaterial = new THREE.MeshStandardMaterial({ 
-            color: 0x4a4a4a,
-            roughness: 0.7,
-            metalness: 0.3
-        });
-        this.platform = new THREE.Mesh(platformGeometry, platformMaterial);
-        this.platform.position.y = -1;
-        this.scene.add(this.platform);
-
-        // Platform edge (red glowing border)
-        const edgeGeometry = new THREE.TorusGeometry(this.platformRadius, 0.3, 16, 100);
-        const edgeMaterial = new THREE.MeshStandardMaterial({ 
-            color: 0xff0000,
-            emissive: 0xff0000,
-            emissiveIntensity: 0.5
-        });
-        this.edge = new THREE.Mesh(edgeGeometry, edgeMaterial);
-        this.edge.rotation.x = Math.PI / 2;
-        this.edge.position.y = 0;
-        this.scene.add(this.edge);
+    _setupTrack() {
+        // Create racing track
+        this.track = new Track(this.scene);
+        console.log('Track initialized');
     }
 
     _setupLights() {
@@ -71,8 +47,20 @@ export class SceneManager {
         this.scene.remove(object);
     }
 
-    getPlatformRadius() {
-        return this.platformRadius;
+    /**
+     * Regenerate the track with a new random layout
+     */
+    regenerateTrack() {
+        if (this.track) {
+            this.track.destroy();
+            this.track = null;
+        }
+        this._setupTrack();
+        console.log('Track regenerated with new layout');
+    }
+
+    getTrack() {
+        return this.track;
     }
 
     getScene() {

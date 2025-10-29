@@ -13,7 +13,7 @@ export class UIManager {
         this.hud = document.createElement('div');
         this.hud.className = 'hud';
         this.hud.innerHTML = `
-            <div class="title">🏎️ BATTLE ROYALE</div>
+            <div class="title">🏎️ RACE TRACK</div>
             <div class="row">
                 <div>Vies</div>
                 <div id="hud-lives" style="color: #ff3333; font-weight: bold; font-size: 18px;">❤️ ❤️ ❤️</div>
@@ -26,6 +26,10 @@ export class UIManager {
                     </div>
                 </div>
             </div>
+            <div class="row">
+                <div>Tour</div>
+                <div id="hud-lap" style="color: #00ff00; font-weight: bold; font-size: 18px;">0</div>
+            </div>
             <div class="row" style="opacity: 0.6; font-size: 12px;">
                 <div>Particules</div>
                 <div id="hud-particles">0</div>
@@ -37,6 +41,61 @@ export class UIManager {
         this.hudElements.lives = document.getElementById('hud-lives');
         this.hudElements.boostFill = document.getElementById('hud-boost-fill');
         this.hudElements.particles = document.getElementById('hud-particles');
+        this.hudElements.lap = document.getElementById('hud-lap');
+
+        // Create now playing notification
+        this._createNowPlaying();
+
+        // Create leaderboard
+        this._createLeaderboard();
+    }
+
+    /**
+     * Create now playing notification
+     */
+    _createNowPlaying() {
+        this.nowPlaying = document.createElement('div');
+        this.nowPlaying.className = 'now-playing';
+        this.nowPlaying.innerHTML = `
+            <div class="now-playing-label">♪ Musique en cours</div>
+            <div class="now-playing-track" id="now-playing-track"></div>
+        `;
+        document.body.appendChild(this.nowPlaying);
+        this.hudElements.nowPlayingTrack = document.getElementById('now-playing-track');
+        this.nowPlayingTimeout = null;
+    }
+
+    /**
+     * Create leaderboard UI
+     */
+    _createLeaderboard() {
+        this.leaderboard = document.createElement('div');
+        this.leaderboard.className = 'leaderboard';
+        this.leaderboard.innerHTML = `
+            <div class="leaderboard-title">🏁 CLASSEMENT</div>
+            <div id="leaderboard-content" class="leaderboard-content"></div>
+        `;
+        document.body.appendChild(this.leaderboard);
+
+        this.hudElements.leaderboardContent = document.getElementById('leaderboard-content');
+        
+        // Create speedometer
+        this._createSpeedometer();
+    }
+
+    /**
+     * Create speedometer UI
+     */
+    _createSpeedometer() {
+        this.speedometer = document.createElement('div');
+        this.speedometer.className = 'speedometer';
+        this.speedometer.innerHTML = `
+            <div class="speedometer-value" id="speedometer-value">0</div>
+            <div class="speedometer-label">KM/H</div>
+        `;
+        document.body.appendChild(this.speedometer);
+
+        this.hudElements.speedometerValue = document.getElementById('speedometer-value');
     }
 
     /**
@@ -67,6 +126,76 @@ export class UIManager {
         if (this.hudElements.particles) {
             this.hudElements.particles.textContent = count;
         }
+    }
+
+    /**
+     * Update speedometer
+     */
+    updateSpeed(speed) {
+        if (this.hudElements.speedometerValue) {
+            // Scale speed: 250 real units = 100 km/h displayed
+            const speedScale = 100 / 250; // 0.4
+            const displaySpeed = Math.round(Math.abs(speed) * speedScale);
+            this.hudElements.speedometerValue.textContent = displaySpeed;
+        }
+    }
+
+    /**
+     * Update current lap display
+     */
+    updateLap(currentLap) {
+        if (this.hudElements.lap) {
+            this.hudElements.lap.textContent = currentLap;
+        }
+    }
+
+    /**
+     * Update leaderboard with all players' lap counts
+     * @param {Array} players - Array of {id, name, laps, isLocal}
+     */
+    updateLeaderboard(players) {
+        if (!this.hudElements.leaderboardContent) return;
+
+        // Sort players by lap count (descending)
+        const sortedPlayers = [...players].sort((a, b) => b.laps - a.laps);
+
+        let html = '';
+        sortedPlayers.forEach((player, index) => {
+            const position = index + 1;
+            const medal = position === 1 ? '🥇' : position === 2 ? '🥈' : position === 3 ? '🥉' : `${position}.`;
+            const highlight = player.isLocal ? 'leaderboard-highlight' : '';
+            const name = player.name || `Joueur ${player.id.substring(0, 4)}`;
+            
+            html += `
+                <div class="leaderboard-entry ${highlight}">
+                    <span class="leaderboard-position">${medal}</span>
+                    <span class="leaderboard-name">${name}${player.isLocal ? ' (Vous)' : ''}</span>
+                    <span class="leaderboard-laps">${player.laps} ${player.laps > 1 ? 'tours' : 'tour'}</span>
+                </div>
+            `;
+        });
+
+        this.hudElements.leaderboardContent.innerHTML = html || '<div style="opacity: 0.5;">Aucun joueur</div>';
+    }
+
+    /**
+     * Show lap completion notification
+     */
+    showLapComplete(lapNumber) {
+        const notification = document.createElement('div');
+        notification.className = 'lap-complete-notification';
+        notification.innerHTML = `
+            <div class="notification-icon">🏁</div>
+            <div class="notification-text">TOUR ${lapNumber} TERMINÉ!</div>
+        `;
+        document.body.appendChild(notification);
+        
+        setTimeout(() => notification.classList.add('show'), 10);
+        
+        setTimeout(() => {
+            notification.classList.remove('show');
+            setTimeout(() => notification.remove(), 500);
+        }, 2000);
     }
 
     /**
@@ -174,9 +303,8 @@ export class UIManager {
             controls = document.createElement('div');
             controls.id = 'host-controls';
             controls.style.position = 'fixed';
-            controls.style.top = '20px';
-            controls.style.left = '10%';
-            controls.style.transform = 'translateX(-50%)';
+            controls.style.bottom = '20px';
+            controls.style.left = '20px';
             controls.style.padding = '15px 30px';
             controls.style.backgroundColor = 'rgba(0, 0, 0, 0.85)';
             controls.style.color = '#ffffff';
@@ -250,5 +378,26 @@ export class UIManager {
     clearMessages() {
         this._removeGameMessage();
         this.removeSpectatorMessage();
+    }
+
+    /**
+     * Show now playing notification
+     */
+    showNowPlaying(trackName) {
+        if (!this.hudElements.nowPlayingTrack || !this.nowPlaying) return;
+
+        // Clear existing timeout
+        if (this.nowPlayingTimeout) {
+            clearTimeout(this.nowPlayingTimeout);
+        }
+
+        // Update track name and show
+        this.hudElements.nowPlayingTrack.textContent = trackName;
+        this.nowPlaying.classList.add('show');
+
+        // Hide after 3 seconds
+        this.nowPlayingTimeout = setTimeout(() => {
+            this.nowPlaying.classList.remove('show');
+        }, 3000);
     }
 }

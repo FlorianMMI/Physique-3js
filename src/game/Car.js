@@ -15,11 +15,12 @@ export class Car {
         
         // Physics properties
         this.speed = 0;
-        this.maxSpeed = 190;
+        this.maxSpeed = 250; // Increased from 190
         this.accel = 20;
-        this.baseMaxSpeed = 190;
+        this.baseMaxSpeed = 250; // Increased from 190
         this.baseAccel = 20;
-        this.turnSpeed = Math.PI * 0.6; // rad/s
+        this.turnSpeed = Math.PI * 0.5; // Slightly increased from 0.45 for better turning
+        this.turnSpeedPenalty = 0.998; // Speed multiplier when turning (99.8% - much less harsh)
         
         // Boost configuration
         this.boostMultiplier = 2.0;
@@ -45,6 +46,12 @@ export class Car {
         this.collisionRadius = 1.2;
         this.collisionCooldown = 0;
         this.collisionCooldownTime = 0.5;
+        
+        // Lap tracking
+        this.currentLap = 0;
+        this.checkpointsCleared = new Set(); // Track which checkpoints have been passed
+        this.lastPosition = new THREE.Vector3(); // For checkpoint crossing detection
+        this.totalCheckpoints = 4; // Should match track's numCheckpoints
         
         // For remote players - interpolation
         this.targetPos = new THREE.Vector3();
@@ -127,13 +134,16 @@ export class Car {
         if (this.mesh) {
             this.mesh.position.set(x, y, z);
             this.mesh.rotation.y = rotY;
+            this.lastPosition.set(x, y, z);
         } else if (this.placeholder) {
             this.placeholder.position.set(x, y, z);
             this.placeholder.rotation.y = rotY;
+            this.lastPosition.set(x, y, z);
         }
         this.speed = 0;
         this.lives = this.maxLives;
         this.isDead = false;
+        this.resetLapProgress();
     }
 
     /**
@@ -149,7 +159,7 @@ export class Car {
 
         // Input processing
         let forward = 0;
-        if (this.keys['s']) forward += 5;
+        if (this.keys['s']) forward += 8; // Increased from 5 for stronger braking
         if (this.keys['z'] || this.keys['w']) forward -= 5;
 
         let turn = 0;
@@ -180,7 +190,10 @@ export class Car {
         if (forward !== 0) {
             this.speed += forward * effectiveAccel * dt;
         } else {
-            this.speed *= Math.max(0, 1 - 4 * dt);
+            // Much lower natural deceleration for better throttle management
+            // Old: 4 * dt (loses ~98% speed per second)
+            // New: 0.5 * dt (loses ~39% speed per second)
+            this.speed *= Math.max(0, 1 - 0.5 * dt);
         }
         this.speed = Math.max(-effectiveMaxSpeed, Math.min(effectiveMaxSpeed, this.speed));
 
@@ -189,8 +202,27 @@ export class Car {
         const skidding = !!(this.keys[' '] || this.keys['space']);
         const turnFactor = skidding ? 1.25 : 1.0;
         
+        // Speed-dependent turning: faster = wider turn radius (less turning)
+        // At low speeds (0-50): full turning ability
+        // At high speeds (200+): reduced turning (~40% of normal)
+        const speedRatio = Math.abs(this.speed) / this.maxSpeed;
+        const speedTurnMultiplier = 1.0 - (speedRatio * 0.6); // Reduces to 40% at max speed
+        
         let deltaYaw = turn * this.turnSpeed * dt * 
-                       (Math.abs(this.speed) / this.maxSpeed) * turnFactor;
+                       (Math.abs(this.speed) / this.maxSpeed) * 
+                       turnFactor * 
+                       speedTurnMultiplier; // Apply speed-dependent reduction
+        
+        // Apply speed penalty when turning (much lighter now)
+        if (Math.abs(turn) > 0.01 && Math.abs(this.speed) > 5) {
+            if (skidding) {
+                // Drifting causes more speed loss than regular turning
+                // Regular turn: 0.2% loss, Drift: 1.5% loss
+                this.speed *= 0.985;
+            } else {
+                this.speed *= this.turnSpeedPenalty;
+            }
+        }
         
         // Skid mechanics
         if (skidding && Math.abs(turn) > 0.01 && Math.abs(this.speed) > this.skidMinSpeed) {
@@ -299,8 +331,9 @@ export class Car {
      */
     getSkidPositions() {
         if (!this.mesh) return null;
-        const leftLocal = new THREE.Vector3(-0.28, 0.02, -1.05);
-        const rightLocal = new THREE.Vector3(0.28, 0.02, -1.05);
+        // Increased horizontal spacing to match tire positions
+        const leftLocal = new THREE.Vector3(-0.55, 0.02, -1.05);
+        const rightLocal = new THREE.Vector3(0.55, 0.02, -1.05);
         return {
             left: leftLocal.applyMatrix4(this.mesh.matrixWorld),
             right: rightLocal.applyMatrix4(this.mesh.matrixWorld)
@@ -316,6 +349,41 @@ export class Car {
             this.isDead = true;
         }
         return this.lives;
+    }
+
+    /**
+     * Pass through a checkpoint
+     */
+    passCheckpoint(checkpointId) {
+        this.checkpointsCleared.add(checkpointId);
+    }
+
+    /**
+     * Check if all checkpoints have been cleared
+     */
+    allCheckpointsCleared() {
+        return this.checkpointsCleared.size >= this.totalCheckpoints;
+    }
+
+    /**
+     * Complete a lap
+     */
+    completeLap() {
+        if (this.allCheckpointsCleared()) {
+            this.currentLap++;
+            this.checkpointsCleared.clear();
+            console.log(`Lap ${this.currentLap} completed!`);
+            return true;
+        }
+        return false;
+    }
+
+    /**
+     * Reset lap progress
+     */
+    resetLapProgress() {
+        this.currentLap = 0;
+        this.checkpointsCleared.clear();
     }
 
     /**

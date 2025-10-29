@@ -9,7 +9,13 @@ export class GameState {
         this.isHost = false;
         this.canPlay = false;
         this.localId = null;
-        this.platformRadius = 40;
+        
+        // Track reference (will be set by Game)
+        this.track = null;
+    }
+
+    setTrack(track) {
+        this.track = track;
     }
 
     setLocalId(id) {
@@ -38,25 +44,35 @@ export class GameState {
     }
 
     /**
-     * Generate random spawn position on platform
+     * Get spawn position at track start
+     * Uses track's getStartPosition with slight offsets for multiple players
      */
     getRandomSpawnPosition() {
-        const angle = Math.random() * Math.PI * 2;
-        const distance = Math.random() * (this.platformRadius - 5);
-        return {
-            x: Math.cos(angle) * distance,
-            y: 0.2,
-            z: Math.sin(angle) * distance,
-            rotY: Math.random() * Math.PI * 2
-        };
+        if (!this.track) {
+            // Fallback if track not set yet
+            return {
+                x: 0,
+                y: 0.2,
+                z: 0,
+                rotY: 0
+            };
+        }
+        
+        // Get start position with a small random lateral offset
+        const lateralOffset = (Math.random() - 0.5) * 4; // Random offset within track width
+        const longitudinalOffset = Math.random() * -3; // Slight stagger behind start line
+        
+        return this.track.getStartPositionOffset(lateralOffset, longitudinalOffset);
     }
 
     /**
      * Check if position is outside platform bounds
+     * Temporarily disabled for racetrack implementation
      */
     isOutOfBounds(x, y, z) {
-        const distFromCenter = Math.sqrt(x * x + z * z);
-        return y < -5 || distFromCenter > this.platformRadius;
+        // TODO: Implement track boundary checking later
+        // For now, only check if car has fallen far below
+        return y < -5;
     }
 
     /**

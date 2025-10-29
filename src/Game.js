@@ -7,6 +7,7 @@ import { GameState } from './game/GameState.js';
 import { ParticleSystem } from './particles/ParticleSystem.js';
 import { NetworkClient } from './network/NetworkClient.js';
 import { UIManager } from './ui/UIManager.js';
+import { SoundManager } from './audio/SoundManager.js';
 
 /**
  * Game - Main game coordinator
@@ -20,12 +21,15 @@ export class Game {
         
         // Game state
         this.gameState = new GameState();
-        this.gameState.platformRadius = this.sceneManager.getPlatformRadius();
+        
+        // Set track reference in game state for spawning
+        this.gameState.setTrack(this.sceneManager.getTrack());
         
         // Systems
         this.particles = new ParticleSystem(this.sceneManager.getScene());
         this.network = new NetworkClient(this.gameState);
         this.ui = new UIManager(this.gameState);
+        this.sound = new SoundManager();
         
         // Players
         this.localCar = null;
@@ -35,6 +39,9 @@ export class Game {
         // Timing
         this.prevTime = performance.now();
         
+        // Sound state tracking
+        this.soundStarted = false;
+        
         this._setupNetworkHandlers();
     }
 
@@ -42,6 +49,14 @@ export class Game {
      * Initialize and start the game
      */
     async init() {
+        // Initialize sound system
+        await this.sound.init(this.camera.getCamera());
+        
+        // Set up track change callback for UI
+        this.sound.setTrackChangeCallback((trackName) => {
+            this.ui.showNowPlaying(trackName);
+        });
+        
         // Create local car
         this.localCar = new Car(this.sceneManager.getScene(), true);
         
@@ -159,6 +174,9 @@ export class Game {
                 player.lives = msg.lives;
                 player.isDead = msg.lives <= 0;
             }
+            if (msg.lap !== undefined) {
+                player.currentLap = msg.lap;
+            }
         }
     }
 
@@ -189,6 +207,13 @@ export class Game {
      */
     _handleGameRestart(msg) {
         console.log('Game restarting!');
+        
+        // Regenerate track with new layout
+        this.sceneManager.regenerateTrack();
+        
+        // Update game state with new track
+        this.gameState.setTrack(this.sceneManager.getTrack());
+        
         this.gameState.reset();
         this.gameState.setCanPlay(true);
         
@@ -200,6 +225,7 @@ export class Game {
         this.remotePlayers.forEach((player) => {
             player.lives = 3;
             player.isDead = false;
+            player.resetLapProgress();
         });
         
         // Re-enable camera follow
@@ -272,9 +298,10 @@ export class Game {
                     .subVectors(player.mesh.position, this.localCar.mesh.position)
                     .normalize();
                 
-                const impactForce = Math.abs(this.localCar.speed) * 0.035;
-                const restitution = 1.2;
-                const separationForce = 2.5;
+                // Reduced collision forces for racetrack gameplay
+                const impactForce = Math.abs(this.localCar.speed) * 0.015; // Reduced from 0.035
+                const restitution = 0.6; // Reduced from 1.2
+                const separationForce = 1.0; // Reduced from 2.5
                 
                 // Send collision to server
                 this.network.sendCollisionPush(
@@ -284,8 +311,12 @@ export class Game {
                     collisionVector.z * (impactForce * restitution + separationForce)
                 );
                 
-                // Reduce local car speed
-                this.localCar.speed *= 0.85;
+                // Reduce local car speed (less aggressive)
+                this.localCar.speed *= 0.92; // Changed from 0.85
+                
+                // Play impact sound based on collision intensity
+                const speedRatio = Math.abs(this.localCar.speed) / this.localCar.maxSpeed;
+                this.sound.playImpact(speedRatio);
                 
                 // Emit explosion particles
                 const impactPoint = new THREE.Vector3()
@@ -300,8 +331,11 @@ export class Game {
 
     /**
      * Check if car fell off platform
+     * TEMPORARILY DISABLED for racetrack implementation
      */
     _checkFallOff() {
+        // Disabled for now - will be reimplemented with track boundaries later
+        /* 
         if (!this.localCar.mesh || this.localCar.isDead) return;
         
         const pos = this.localCar.mesh.position;
@@ -325,6 +359,142 @@ export class Game {
                 this.network.notifyFall();
             }
         }
+        */
+    }
+
+    /**
+     * Check collisions with track walls
+     */
+    _checkWallCollisions() {
+        if (!this.localCar.mesh || this.localCar.isDead) return;
+        
+        const track = this.sceneManager.getTrack();
+        if (!track) return;
+
+        const collision = track.checkWallCollision(this.localCar.mesh.position);
+        
+        if (collision) {
+            // More aggressive push to prevent clipping
+            const pushStrength = Math.min(collision.penetrationDepth * 1.5, 1.0);
+            this.localCar.mesh.position.add(
+                collision.correctionVector.multiplyScalar(pushStrength)
+            );
+            
+            // Calculate impact intensity for sound
+            const speedBeforeImpact = Math.abs(this.localCar.speed);
+            
+            // Reduce speed by 30%
+            this.localCar.speed *= 0.7;
+            
+            // Play impact sound if speed is significant
+            if (speedBeforeImpact > 10) {
+                const speedRatio = speedBeforeImpact / this.localCar.maxSpeed;
+                this.sound.playImpact(speedRatio);
+            }
+            
+            // Turn the car away from the wall
+            // Calculate the direction we want the car to face (along the correction vector)
+            const desiredDirection = collision.correctionVector.clone();
+            const currentRotation = this.localCar.mesh.rotation.y;
+            const targetRotation = Math.atan2(desiredDirection.x, desiredDirection.z);
+            
+            // Calculate shortest rotation difference
+            let rotationDiff = targetRotation - currentRotation;
+            // Normalize to -PI to PI range
+            while (rotationDiff > Math.PI) rotationDiff -= Math.PI * 2;
+            while (rotationDiff < -Math.PI) rotationDiff += Math.PI * 2;
+            
+            // Apply stronger rotation toward the correction direction
+            const turnStrength = 0.2; // Increased from 0.15 for more aggressive turning
+            this.localCar.mesh.rotation.y += rotationDiff * turnStrength;
+            
+            // Emit particles on harder impacts
+            if (Math.abs(this.localCar.speed) > 10) {
+                this.particles.emitExplosion(this.localCar.mesh.position.clone());
+            }
+        }
+    }
+
+    /**
+     * Check if car passes through checkpoints and finish line
+     */
+    _checkCheckpoints() {
+        if (!this.localCar.mesh || this.localCar.isDead) return;
+        
+        const track = this.sceneManager.getTrack();
+        if (!track) return;
+
+        const currentPos = this.localCar.mesh.position.clone();
+        const lastPos = this.localCar.lastPosition;
+        
+        // Check each checkpoint
+        for (let i = 0; i < track.checkpoints.length; i++) {
+            if (!this.localCar.checkpointsCleared.has(i)) {
+                const checkpoint = track.checkCheckpoint(lastPos, currentPos, i);
+                if (checkpoint) {
+                    this.localCar.passCheckpoint(i);
+                    console.log(`Checkpoint ${i + 1}/${track.checkpoints.length} passed`);
+                    
+                    // Send checkpoint update to server
+                    this.network.sendMessage({
+                        type: 'checkpoint',
+                        checkpointId: i
+                    });
+                }
+            }
+        }
+        
+        // Check finish line (only if all checkpoints are cleared)
+        if (this.localCar.allCheckpointsCleared()) {
+            const crossedFinish = track.checkFinishLine(lastPos, currentPos);
+            if (crossedFinish) {
+                const lapCompleted = this.localCar.completeLap();
+                if (lapCompleted) {
+                    console.log(`🏁 Lap ${this.localCar.currentLap} completed!`);
+                    
+                    // Send lap completion to server
+                    this.network.sendMessage({
+                        type: 'lap_complete',
+                        lap: this.localCar.currentLap
+                    });
+                    
+                    // Show UI feedback
+                    this.ui.showLapComplete(this.localCar.currentLap);
+                }
+            }
+        }
+        
+        // Update last position for next frame
+        this.localCar.lastPosition.copy(currentPos);
+    }
+
+    /**
+     * Update leaderboard with all players' lap data
+     */
+    _updateLeaderboard() {
+        const players = [];
+        
+        // Add local player
+        if (this.localCar) {
+            players.push({
+                id: this.gameState.localId,
+                name: 'You',
+                laps: this.localCar.currentLap,
+                isLocal: true
+            });
+        }
+        
+        // Add remote players
+        this.remotePlayers.forEach((player, id) => {
+            players.push({
+                id: id,
+                name: null,
+                laps: player.currentLap || 0,
+                isLocal: false
+            });
+        });
+        
+        this.ui.updateLeaderboard(players);
     }
 
     /**
@@ -379,6 +549,12 @@ export class Game {
         // Check collisions
         this._checkCollisions(dt);
         
+        // Check wall collisions
+        this._checkWallCollisions();
+        
+        // Check checkpoints and finish line
+        this._checkCheckpoints();
+        
         // Check if fell off platform
         this._checkFallOff();
         
@@ -387,6 +563,30 @@ export class Game {
                        this.gameState.isGameActive && 
                        this.gameState.canPlay;
         const actions = this.localCar.updatePhysics(dt, canMove);
+        
+        // Start sound when game becomes active
+        if (this.gameState.isGameActive && !this.soundStarted) {
+            this.sound.start();
+            this.soundStarted = true;
+        } else if (!this.gameState.isGameActive && this.soundStarted) {
+            this.sound.stop();
+            this.soundStarted = false;
+        }
+        
+        // Update sound system
+        if (canMove) {
+            const isAccelerating = actions && (actions.forward < 0 || actions.boosting);
+            const isBoosting = actions && actions.boosting;
+            const isSkidding = actions && actions.skidding;
+            this.sound.update(
+                this.localCar.speed, 
+                this.localCar.maxSpeed, 
+                isAccelerating,
+                isBoosting,
+                isSkidding,
+                dt
+            );
+        }
         
         // Emit particles based on car actions
         if (canMove) {
@@ -405,7 +605,12 @@ export class Game {
         // Update UI
         this.ui.updateLives(this.localCar.lives, this.localCar.maxLives);
         this.ui.updateBoost(this.localCar.boostEnergy, this.localCar.boostMaxEnergy);
+        this.ui.updateLap(this.localCar.currentLap);
+        this.ui.updateSpeed(this.localCar.speed);
         this.ui.updateParticleCount(this.particles.getParticleCount());
+        
+        // Update leaderboard
+        this._updateLeaderboard();
         
         // Render
         this.renderer.render(this.sceneManager.getScene(), this.camera.getCamera());
