@@ -169,13 +169,13 @@ export class Game {
                 this.sceneManager.add(player.mesh);
             }
             
-            player.setTarget(msg.x, msg.y, msg.z, msg.rotY, msg.vx, msg.vz);
+            player.setTarget(msg.x, msg.y, msg.z, msg.rotY, msg.vx, msg.vz, msg.segmentId, msg.segmentT);
             this.remotePlayers.set(id, player);
             
             console.log('Created remote player:', id);
         } else {
             // Update existing player
-            player.setTarget(msg.x, msg.y, msg.z, msg.rotY, msg.vx, msg.vz);
+            player.setTarget(msg.x, msg.y, msg.z, msg.rotY, msg.vx, msg.vz, msg.segmentId, msg.segmentT);
             if (msg.lives !== undefined) {
                 player.lives = msg.lives;
                 player.isDead = msg.lives <= 0;

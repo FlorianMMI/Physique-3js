@@ -28,6 +28,8 @@ export class Car {
         this.pitchLerpSpeed = 0.15; // How quickly pitch follows track (increased for smoother)
         this.rollLerpSpeed = 0.15; // How quickly roll follows track (increased for smoother)
         this.altitudeLerpSpeed = 0.2; // How quickly altitude follows track
+        this.currentSegmentId = null; // Which track segment the car is currently on
+        this.segmentT = 0; // Position along the current segment (0-1)
         
         // Boost configuration
         this.boostMultiplier = 2.0;
@@ -279,13 +281,19 @@ export class Car {
 
     /**
      * Update car to follow track surface (altitude and tilt)
+     * Now uses segment-based tracking to support overlapping tracks
      * @param {Track} track - The track object to follow
      */
     followTrackSurface(track) {
         if (!this.mesh || !track) return;
 
         // Get track surface information at car's position
-        const surfaceInfo = track.getTrackSurfaceAt(this.mesh.position);
+        // Pass current segment to optimize search and handle overlaps
+        const surfaceInfo = track.getTrackSurfaceAt(this.mesh.position, this.currentSegmentId);
+        
+        // Update segment tracking
+        this.currentSegmentId = surfaceInfo.segmentId;
+        this.segmentT = surfaceInfo.t;
         
         // Update car's Y position to match track altitude (with offset for car height)
         const carHeightOffset = 0.3; // Adjust based on your car model
@@ -336,13 +344,31 @@ export class Car {
 
     /**
      * Update target position/rotation for interpolation
+     * Now includes segment tracking for overlapping track support
      */
-    setTarget(x, y, z, rotY, vx, vz) {
+    setTarget(x, y, z, rotY, vx, vz, segmentId, segmentT) {
         this.targetPos.set(x, y, z);
         this.targetRot = rotY;
         if (vx !== undefined && vz !== undefined) {
             this.velocity.set(vx, 0, vz);
         }
+        // Update segment tracking if provided
+        if (segmentId !== undefined) {
+            this.currentSegmentId = segmentId;
+        }
+        if (segmentT !== undefined) {
+            this.segmentT = segmentT;
+        }
+    }
+
+    /**
+     * Get current segment data for network sync
+     */
+    getSegmentData() {
+        return {
+            segmentId: this.currentSegmentId,
+            segmentT: this.segmentT
+        };
     }
 
     /**

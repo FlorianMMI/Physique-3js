@@ -15,6 +15,10 @@ export class Track {
         this.skeletonPoints = []; // Array of Vector3 points defining the centerline
         this.trackCurve = null; // Smooth curve for surface queries
         
+        // Segment-based system for overlapping track support
+        this.segments = []; // Array of track segments with connectivity
+        this.segmentCurves = []; // Individual curves for each segment
+        
         // Track meshes
         this.trackMesh = null;
         this.innerWall = null;
@@ -27,6 +31,7 @@ export class Track {
         
         // Generate the track
         this._generateSkeleton();
+        this._createSegments();
         this._buildTrack();
         this._buildWalls();
         this._createCheckpoints();
@@ -164,6 +169,82 @@ export class Track {
         this.trackCurve.closed = true;
         
         console.log(`Track skeleton generated with ${this.skeletonPoints.length} points (varied radius and altitude)`);
+    }
+
+    /**
+     * Create track segments for overlapping track support
+     * Each segment has its own curve and knows its neighbors
+     */
+    _createSegments() {
+        const numPoints = this.skeletonPoints.length;
+        const pointsPerSegment = 4; // Each segment spans 4 skeleton points for smooth curves
+        const numSegments = Math.floor(numPoints / pointsPerSegment);
+        
+        this.segments = [];
+        this.segmentCurves = [];
+        
+        for (let i = 0; i < numSegments; i++) {
+            const startIdx = i * pointsPerSegment;
+            const endIdx = ((i + 1) * pointsPerSegment) % numPoints;
+            
+            // Get points for this segment (include extra points for smooth Catmull-Rom)
+            const segmentPoints = [];
+            const startPoint = (startIdx - 1 + numPoints) % numPoints;
+            const pointCount = pointsPerSegment + 2; // Include one before and one after
+            
+            for (let j = 0; j < pointCount; j++) {
+                const idx = (startPoint + j) % numPoints;
+                segmentPoints.push(this.skeletonPoints[idx].clone());
+            }
+            
+            // Create curve for this segment
+            const segmentCurve = new THREE.CatmullRomCurve3(segmentPoints);
+            segmentCurve.closed = false;
+            this.segmentCurves.push(segmentCurve);
+            
+            // Create segment metadata
+            const segment = {
+                id: i,
+                startIdx: startIdx,
+                endIdx: endIdx,
+                curve: segmentCurve,
+                // t range on the curve (exclude the extra endpoints)
+                tStart: 1 / (pointCount - 1), // Skip first point
+                tEnd: (pointCount - 2) / (pointCount - 1), // Skip last point
+                // Neighbors (previous and next segments)
+                prevSegment: (i - 1 + numSegments) % numSegments,
+                nextSegment: (i + 1) % numSegments,
+                // Bounding box for quick rejection (calculated below)
+                bounds: { minX: 0, maxX: 0, minZ: 0, maxZ: 0, minY: 0, maxY: 0 }
+            };
+            
+            // Calculate bounding box for this segment
+            let minX = Infinity, maxX = -Infinity;
+            let minZ = Infinity, maxZ = -Infinity;
+            let minY = Infinity, maxY = -Infinity;
+            
+            for (let t = segment.tStart; t <= segment.tEnd; t += 0.1) {
+                const point = segmentCurve.getPoint(t);
+                minX = Math.min(minX, point.x);
+                maxX = Math.max(maxX, point.x);
+                minZ = Math.min(minZ, point.z);
+                maxZ = Math.max(maxZ, point.z);
+                minY = Math.min(minY, point.y);
+                maxY = Math.max(maxY, point.y);
+            }
+            
+            // Add padding to bounds
+            const padding = this.trackWidth;
+            segment.bounds = {
+                minX: minX - padding, maxX: maxX + padding,
+                minZ: minZ - padding, maxZ: maxZ + padding,
+                minY: minY - padding, maxY: maxY + padding
+            };
+            
+            this.segments.push(segment);
+        }
+        
+        console.log(`Track divided into ${this.segments.length} segments`);
     }
 
     /**
@@ -705,50 +786,92 @@ export class Track {
 
     /**
      * Get track altitude and pitch at a given position
-     * Returns altitude (Y position) and pitch (rotation around X axis)
-     * Uses the smooth curve for continuous interpolation
+     * Uses segment-based approach to support overlapping tracks
      * @param {THREE.Vector3} position - Position to query
-     * @returns {Object} { altitude: number, pitch: number, roll: number }
+     * @param {number} currentSegmentId - The segment the car is currently on (null to search all)
+     * @returns {Object} { altitude: number, pitch: number, roll: number, segmentId: number, t: number }
      */
-    getTrackSurfaceAt(position) {
-        if (!this.trackCurve || this.skeletonPoints.length < 2) {
-            return { altitude: 0, pitch: 0, roll: 0 };
+    getTrackSurfaceAt(position, currentSegmentId = null) {
+        if (!this.trackCurve || this.segments.length === 0) {
+            return { altitude: 0, pitch: 0, roll: 0, segmentId: 0, t: 0 };
         }
 
-        // Find the closest point on the curve by sampling
-        // We'll use a two-pass approach: coarse then fine
+        // Determine which segments to search
+        let segmentsToSearch = [];
+        
+        if (currentSegmentId !== null && currentSegmentId >= 0 && currentSegmentId < this.segments.length) {
+            // Search current segment and neighbors
+            const current = this.segments[currentSegmentId];
+            segmentsToSearch = [
+                currentSegmentId,
+                current.prevSegment,
+                current.nextSegment
+            ];
+        } else {
+            // Search all segments (initial placement or car lost track)
+            // First, do a quick bounding box check to reduce search space
+            for (let i = 0; i < this.segments.length; i++) {
+                const bounds = this.segments[i].bounds;
+                if (position.x >= bounds.minX && position.x <= bounds.maxX &&
+                    position.z >= bounds.minZ && position.z <= bounds.maxZ) {
+                    segmentsToSearch.push(i);
+                }
+            }
+            
+            // If no segments match bounds (shouldn't happen), search all
+            if (segmentsToSearch.length === 0) {
+                segmentsToSearch = Array.from({ length: this.segments.length }, (_, i) => i);
+            }
+        }
+
+        // Find the best matching segment and position
+        let bestSegmentId = currentSegmentId !== null ? currentSegmentId : 0;
         let bestT = 0;
         let bestDist = Infinity;
         
-        // Coarse pass: check at regular intervals
-        const coarseSamples = 64; // One sample per skeleton point
-        for (let i = 0; i < coarseSamples; i++) {
-            const t = i / coarseSamples;
-            const point = this.trackCurve.getPoint(t);
-            const dist = new THREE.Vector2(
-                position.x - point.x,
-                position.z - point.z
-            ).lengthSq(); // Use squared distance for speed
+        for (const segmentId of segmentsToSearch) {
+            const segment = this.segments[segmentId];
+            const curve = segment.curve;
             
-            if (dist < bestDist) {
-                bestDist = dist;
-                bestT = t;
+            // Sample points along this segment
+            const samples = 20;
+            const tRange = segment.tEnd - segment.tStart;
+            
+            for (let i = 0; i <= samples; i++) {
+                const t = segment.tStart + (tRange * i / samples);
+                const point = curve.getPoint(t);
+                
+                // Calculate 2D distance (ignore Y to support overlaps)
+                const dist = Math.sqrt(
+                    (position.x - point.x) ** 2 +
+                    (position.z - point.z) ** 2
+                );
+                
+                if (dist < bestDist) {
+                    bestDist = dist;
+                    bestT = t;
+                    bestSegmentId = segmentId;
+                }
             }
         }
         
-        // Fine pass: refine around the best coarse match
-        const fineRange = 2.0 / coarseSamples; // Search +/- 2 segments
+        // Refine the best position with a fine search
+        const segment = this.segments[bestSegmentId];
+        const curve = segment.curve;
+        const fineRange = 0.05;
         const fineSamples = 10;
-        const fineStart = Math.max(0, bestT - fineRange);
-        const fineEnd = Math.min(1, bestT + fineRange);
+        
+        const fineStart = Math.max(segment.tStart, bestT - fineRange);
+        const fineEnd = Math.min(segment.tEnd, bestT + fineRange);
         
         for (let i = 0; i <= fineSamples; i++) {
             const t = fineStart + (fineEnd - fineStart) * (i / fineSamples);
-            const point = this.trackCurve.getPoint(t);
-            const dist = new THREE.Vector2(
-                position.x - point.x,
-                position.z - point.z
-            ).lengthSq();
+            const point = curve.getPoint(t);
+            
+            const dist = Math.sqrt(
+                (position.x - point.x) ** 2 +
+                (position.z - point.z) ** 2
+            );
             
             if (dist < bestDist) {
                 bestDist = dist;
@@ -756,27 +879,22 @@ export class Track {
             }
         }
         
-        // Get the point on the curve at the best t value
-        const curvePoint = this.trackCurve.getPoint(bestT);
+        // Get the final surface information
+        const curvePoint = curve.getPoint(bestT);
         const altitude = curvePoint.y;
         
-        // Get tangent at this point for calculating pitch
-        const tangent = this.trackCurve.getTangent(bestT);
-        
-        // Calculate pitch from the tangent's vertical component
-        // pitch = atan2(vertical, horizontal)
+        // Get tangent for pitch calculation
+        const tangent = curve.getTangent(bestT);
         const horizontalLength = Math.sqrt(tangent.x * tangent.x + tangent.z * tangent.z);
         const pitch = Math.atan2(tangent.y, horizontalLength);
         
-        // Calculate roll (banking) based on curvature
-        // Sample points slightly before and after for curvature estimation
-        const tBefore = Math.max(0, bestT - 0.01);
-        const tAfter = Math.min(1, bestT + 0.01);
+        // Calculate roll from curvature
+        const tBefore = Math.max(segment.tStart, bestT - 0.01);
+        const tAfter = Math.min(segment.tEnd, bestT + 0.01);
         
-        const pointBefore = this.trackCurve.getPoint(tBefore);
-        const pointAfter = this.trackCurve.getPoint(tAfter);
+        const pointBefore = curve.getPoint(tBefore);
+        const pointAfter = curve.getPoint(tAfter);
         
-        // Calculate direction vectors (in XZ plane)
         const dirBefore = new THREE.Vector2(
             curvePoint.x - pointBefore.x,
             curvePoint.z - pointBefore.z
@@ -787,24 +905,23 @@ export class Track {
             pointAfter.z - curvePoint.z
         ).normalize();
         
-        // Calculate angle change (curvature)
         const angleBefore = Math.atan2(dirBefore.y, dirBefore.x);
         const angleAfter = Math.atan2(dirAfter.y, dirAfter.x);
         let angleDiff = angleAfter - angleBefore;
         
-        // Normalize angle to -PI to PI
         while (angleDiff > Math.PI) angleDiff -= Math.PI * 2;
         while (angleDiff < -Math.PI) angleDiff += Math.PI * 2;
         
-        // Convert curvature to roll (banking)
-        const maxRoll = 0.15; // Maximum banking angle in radians (~8.6 degrees)
-        const curvatureScale = 15; // Scale factor for banking intensity
+        const maxRoll = 0.15;
+        const curvatureScale = 15;
         const roll = -angleDiff * curvatureScale;
         
         return { 
             altitude, 
             pitch, 
-            roll: THREE.MathUtils.clamp(roll, -maxRoll, maxRoll)
+            roll: THREE.MathUtils.clamp(roll, -maxRoll, maxRoll),
+            segmentId: bestSegmentId,
+            t: bestT
         };
     }
 
