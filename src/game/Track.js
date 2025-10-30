@@ -13,6 +13,7 @@ export class Track {
         this.trackWidth = 12; // Width of the racing track (increased for larger track)
         this.wallHeight = 0.6; // Height of the track walls (reduced for better visibility)
         this.skeletonPoints = []; // Array of Vector3 points defining the centerline
+        this.trackCurve = null; // Smooth curve for surface queries
         
         // Track meshes
         this.trackMesh = null;
@@ -34,7 +35,7 @@ export class Track {
 
     /**
      * Generate the skeleton path for the track
-     * Creates a circular base with radius variation for interesting turns
+     * Creates a circular base with radius variation for interesting turns and altitude changes
      */
     _generateSkeleton() {
         this.skeletonPoints = [];
@@ -44,8 +45,15 @@ export class Track {
         const radiusVariation = 0.3; // How much the radius can vary (0.3 = 30%)
         const smoothing = 0.6; // How much to smooth out sharp changes (0-1, higher = smoother)
         
+        // Altitude variation parameters
+        const maxAltitude = 8; // Maximum altitude change (positive or negative)
+        const altitudeSmoothing = 0.7; // Higher = smoother altitude transitions
+        const startLevelLength = 8; // Number of segments to keep level near start/finish
+        
         // Generate random radius multipliers for each segment
         const radiusMultipliers = [];
+        const altitudeValues = [];
+        
         for (let i = 0; i < segments; i++) {
             // Calculate distance from finish line (segment 0)
             // Distance wraps around the circle
@@ -63,9 +71,32 @@ export class Track {
             // Random variation between (1 - localVariation) and (1 + localVariation)
             const randomMultiplier = 1 + (Math.random() * 2 - 1) * localVariation;
             radiusMultipliers.push(randomMultiplier);
+            
+            // Generate altitude values
+            // Reduce altitude variation near start/finish line for smoother start
+            let localAltitudeVariation = maxAltitude;
+            if (distanceFromStart < startLevelLength) {
+                const altitudeMultiplier = distanceFromStart / startLevelLength;
+                localAltitudeVariation = maxAltitude * altitudeMultiplier;
+            }
+            
+            // Random altitude, biased towards previous segment's altitude
+            let altitude;
+            if (i === 0) {
+                altitude = 0; // Start at ground level
+            } else {
+                const prevAltitude = altitudeValues[i - 1];
+                // Random change from previous altitude (-localAltitudeVariation to +localAltitudeVariation)
+                const maxChange = localAltitudeVariation * 0.3; // Limit change per segment
+                const altitudeChange = (Math.random() * 2 - 1) * maxChange;
+                altitude = prevAltitude + altitudeChange;
+                // Clamp to max altitude range
+                altitude = Math.max(-maxAltitude, Math.min(maxAltitude, altitude));
+            }
+            altitudeValues.push(altitude);
         }
         
-        // Smooth the multipliers to avoid sharp transitions
+        // Smooth the radius multipliers to avoid sharp transitions
         const smoothedMultipliers = [];
         for (let i = 0; i < segments; i++) {
             const prev = radiusMultipliers[(i - 1 + segments) % segments];
@@ -90,18 +121,49 @@ export class Track {
             finalMultipliers.push(smoothed);
         }
         
-        // Generate points with varied radius
+        // Smooth altitude values
+        const smoothedAltitudes = [];
+        for (let i = 0; i < segments; i++) {
+            const prev = altitudeValues[(i - 1 + segments) % segments];
+            const curr = altitudeValues[i];
+            const next = altitudeValues[(i + 1) % segments];
+            
+            const smoothed = prev * altitudeSmoothing * 0.5 + 
+                           curr * (1 - altitudeSmoothing) + 
+                           next * altitudeSmoothing * 0.5;
+            smoothedAltitudes.push(smoothed);
+        }
+        
+        // Apply second pass of altitude smoothing
+        const finalAltitudes = [];
+        for (let i = 0; i < segments; i++) {
+            const prev = smoothedAltitudes[(i - 1 + segments) % segments];
+            const curr = smoothedAltitudes[i];
+            const next = smoothedAltitudes[(i + 1) % segments];
+            
+            const smoothed = prev * 0.25 + curr * 0.5 + next * 0.25;
+            finalAltitudes.push(smoothed);
+        }
+        
+        // Generate points with varied radius and altitude
         for (let i = 0; i < segments; i++) {
             const angle = (i / segments) * Math.PI * 2;
             const radius = baseRadius * finalMultipliers[i];
             
             const x = Math.cos(angle) * radius;
+            const y = finalAltitudes[i]; // Use smoothed altitude
             const z = Math.sin(angle) * radius;
             
-            this.skeletonPoints.push(new THREE.Vector3(x, 0, z));
+            this.skeletonPoints.push(new THREE.Vector3(x, y, z));
         }
         
-        console.log(`Track skeleton generated with ${this.skeletonPoints.length} points (varied radius)`);
+        // Create smooth curve from skeleton points for surface queries
+        const curvePoints = [...this.skeletonPoints];
+        curvePoints.push(this.skeletonPoints[0].clone()); // Close the loop
+        this.trackCurve = new THREE.CatmullRomCurve3(curvePoints);
+        this.trackCurve.closed = true;
+        
+        console.log(`Track skeleton generated with ${this.skeletonPoints.length} points (varied radius and altitude)`);
     }
 
     /**
@@ -639,6 +701,111 @@ export class Track {
         const normal = new THREE.Vector3(-tangent.z, 0, tangent.x).normalize();
         
         return normal;
+    }
+
+    /**
+     * Get track altitude and pitch at a given position
+     * Returns altitude (Y position) and pitch (rotation around X axis)
+     * Uses the smooth curve for continuous interpolation
+     * @param {THREE.Vector3} position - Position to query
+     * @returns {Object} { altitude: number, pitch: number, roll: number }
+     */
+    getTrackSurfaceAt(position) {
+        if (!this.trackCurve || this.skeletonPoints.length < 2) {
+            return { altitude: 0, pitch: 0, roll: 0 };
+        }
+
+        // Find the closest point on the curve by sampling
+        // We'll use a two-pass approach: coarse then fine
+        let bestT = 0;
+        let bestDist = Infinity;
+        
+        // Coarse pass: check at regular intervals
+        const coarseSamples = 64; // One sample per skeleton point
+        for (let i = 0; i < coarseSamples; i++) {
+            const t = i / coarseSamples;
+            const point = this.trackCurve.getPoint(t);
+            const dist = new THREE.Vector2(
+                position.x - point.x,
+                position.z - point.z
+            ).lengthSq(); // Use squared distance for speed
+            
+            if (dist < bestDist) {
+                bestDist = dist;
+                bestT = t;
+            }
+        }
+        
+        // Fine pass: refine around the best coarse match
+        const fineRange = 2.0 / coarseSamples; // Search +/- 2 segments
+        const fineSamples = 10;
+        const fineStart = Math.max(0, bestT - fineRange);
+        const fineEnd = Math.min(1, bestT + fineRange);
+        
+        for (let i = 0; i <= fineSamples; i++) {
+            const t = fineStart + (fineEnd - fineStart) * (i / fineSamples);
+            const point = this.trackCurve.getPoint(t);
+            const dist = new THREE.Vector2(
+                position.x - point.x,
+                position.z - point.z
+            ).lengthSq();
+            
+            if (dist < bestDist) {
+                bestDist = dist;
+                bestT = t;
+            }
+        }
+        
+        // Get the point on the curve at the best t value
+        const curvePoint = this.trackCurve.getPoint(bestT);
+        const altitude = curvePoint.y;
+        
+        // Get tangent at this point for calculating pitch
+        const tangent = this.trackCurve.getTangent(bestT);
+        
+        // Calculate pitch from the tangent's vertical component
+        // pitch = atan2(vertical, horizontal)
+        const horizontalLength = Math.sqrt(tangent.x * tangent.x + tangent.z * tangent.z);
+        const pitch = Math.atan2(tangent.y, horizontalLength);
+        
+        // Calculate roll (banking) based on curvature
+        // Sample points slightly before and after for curvature estimation
+        const tBefore = Math.max(0, bestT - 0.01);
+        const tAfter = Math.min(1, bestT + 0.01);
+        
+        const pointBefore = this.trackCurve.getPoint(tBefore);
+        const pointAfter = this.trackCurve.getPoint(tAfter);
+        
+        // Calculate direction vectors (in XZ plane)
+        const dirBefore = new THREE.Vector2(
+            curvePoint.x - pointBefore.x,
+            curvePoint.z - pointBefore.z
+        ).normalize();
+        
+        const dirAfter = new THREE.Vector2(
+            pointAfter.x - curvePoint.x,
+            pointAfter.z - curvePoint.z
+        ).normalize();
+        
+        // Calculate angle change (curvature)
+        const angleBefore = Math.atan2(dirBefore.y, dirBefore.x);
+        const angleAfter = Math.atan2(dirAfter.y, dirAfter.x);
+        let angleDiff = angleAfter - angleBefore;
+        
+        // Normalize angle to -PI to PI
+        while (angleDiff > Math.PI) angleDiff -= Math.PI * 2;
+        while (angleDiff < -Math.PI) angleDiff += Math.PI * 2;
+        
+        // Convert curvature to roll (banking)
+        const maxRoll = 0.15; // Maximum banking angle in radians (~8.6 degrees)
+        const curvatureScale = 15; // Scale factor for banking intensity
+        const roll = -angleDiff * curvatureScale;
+        
+        return { 
+            altitude, 
+            pitch, 
+            roll: THREE.MathUtils.clamp(roll, -maxRoll, maxRoll)
+        };
     }
 
     /**

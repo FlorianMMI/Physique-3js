@@ -22,6 +22,13 @@ export class Car {
         this.turnSpeed = Math.PI * 0.5; // Slightly increased from 0.45 for better turning
         this.turnSpeedPenalty = 0.998; // Speed multiplier when turning (99.8% - much less harsh)
         
+        // Track following properties
+        this.trackPitch = 0; // Current pitch from track slope
+        this.trackRoll = 0; // Current roll from track banking
+        this.pitchLerpSpeed = 0.15; // How quickly pitch follows track (increased for smoother)
+        this.rollLerpSpeed = 0.15; // How quickly roll follows track (increased for smoother)
+        this.altitudeLerpSpeed = 0.2; // How quickly altitude follows track
+        
         // Boost configuration
         this.boostMultiplier = 2.0;
         this.boostMaxMultiplier = 1.5;
@@ -268,6 +275,40 @@ export class Car {
             boosting: boostAvailable,
             skidding
         };
+    }
+
+    /**
+     * Update car to follow track surface (altitude and tilt)
+     * @param {Track} track - The track object to follow
+     */
+    followTrackSurface(track) {
+        if (!this.mesh || !track) return;
+
+        // Get track surface information at car's position
+        const surfaceInfo = track.getTrackSurfaceAt(this.mesh.position);
+        
+        // Update car's Y position to match track altitude (with offset for car height)
+        const carHeightOffset = 0.3; // Adjust based on your car model
+        const targetY = surfaceInfo.altitude + carHeightOffset;
+        
+        // Smoothly lerp altitude to avoid jumping
+        this.mesh.position.y = THREE.MathUtils.lerp(
+            this.mesh.position.y, 
+            targetY, 
+            this.altitudeLerpSpeed
+        );
+        
+        // Smoothly interpolate pitch and roll
+        this.trackPitch = THREE.MathUtils.lerp(this.trackPitch, surfaceInfo.pitch, this.pitchLerpSpeed);
+        this.trackRoll = THREE.MathUtils.lerp(this.trackRoll, surfaceInfo.roll, this.rollLerpSpeed);
+        
+        // Apply pitch (rotation around X axis - going up/down slopes)
+        this.mesh.rotation.x = this.trackPitch;
+        
+        // Apply roll (rotation around Z axis - banking on turns)
+        // We need to apply this after the yaw rotation
+        const yaw = this.mesh.rotation.y;
+        this.mesh.rotation.set(this.trackPitch, yaw, this.trackRoll, 'YXZ');
     }
 
     /**

@@ -622,6 +622,20 @@ export class Game {
                        this.gameState.canPlay;
         const actions = this.localCar.updatePhysics(dt, canMove);
         
+        // Update car to follow track surface
+        if (canMove) {
+            const track = this.sceneManager.getTrack();
+            this.localCar.followTrackSurface(track);
+        }
+        
+        // Update remote players to follow track surface
+        this.remotePlayers.forEach((player) => {
+            if (!player.isDead) {
+                const track = this.sceneManager.getTrack();
+                player.followTrackSurface(track);
+            }
+        });
+        
         // Start sound when game becomes active
         if (this.gameState.isGameActive && !this.soundStarted) {
             this.sound.start();
