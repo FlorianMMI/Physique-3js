@@ -540,7 +540,7 @@ export class Track {
         
         // Position the finish line
         this.finishLineMesh.position.copy(startPoint);
-        this.finishLineMesh.position.y = 0.05; // Slightly above ground
+        this.finishLineMesh.position.y += 0.05; // Slightly above ground
         
         // Rotate to lay flat on the ground and align with track direction
         this.finishLineMesh.rotation.x = -Math.PI / 2; // Lay flat
