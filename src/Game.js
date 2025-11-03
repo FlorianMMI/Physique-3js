@@ -57,6 +57,12 @@ export class Game {
             this.ui.showNowPlaying(trackName);
         });
         
+        // Initialize minimap with track data
+        const track = this.sceneManager.getTrack();
+        if (track && track.skeletonPoints) {
+            this.ui.initMinimap(track.skeletonPoints);
+        }
+        
         // Create local car
         this.localCar = new Car(this.sceneManager.getScene(), true);
         
@@ -163,13 +169,13 @@ export class Game {
                 this.sceneManager.add(player.mesh);
             }
             
-            player.setTarget(msg.x, msg.y, msg.z, msg.rotY, msg.vx, msg.vz);
+            player.setTarget(msg.x, msg.y, msg.z, msg.rotY, msg.vx, msg.vz, msg.segmentId, msg.segmentT);
             this.remotePlayers.set(id, player);
             
             console.log('Created remote player:', id);
         } else {
             // Update existing player
-            player.setTarget(msg.x, msg.y, msg.z, msg.rotY, msg.vx, msg.vz);
+            player.setTarget(msg.x, msg.y, msg.z, msg.rotY, msg.vx, msg.vz, msg.segmentId, msg.segmentT);
             if (msg.lives !== undefined) {
                 player.lives = msg.lives;
                 player.isDead = msg.lives <= 0;
@@ -218,6 +224,12 @@ export class Game {
         
         // Update game state with new track
         this.gameState.setTrack(this.sceneManager.getTrack());
+        
+        // Reinitialize minimap with new track
+        const track = this.sceneManager.getTrack();
+        if (track && track.skeletonPoints) {
+            this.ui.initMinimap(track.skeletonPoints);
+        }
         
         this.gameState.reset();
         this.gameState.setCanPlay(true);
@@ -507,6 +519,43 @@ export class Game {
     }
 
     /**
+     * Update minimap with all players' positions
+     */
+    _updateMinimap() {
+        const players = [];
+        
+        // Add local player
+        if (this.localCar && this.localCar.mesh) {
+            players.push({
+                position: {
+                    x: this.localCar.mesh.position.x,
+                    z: this.localCar.mesh.position.z
+                },
+                rotation: this.localCar.mesh.rotation.y,
+                color: '#' + this.localCar.color.getHexString(),
+                isLocal: true
+            });
+        }
+        
+        // Add remote players
+        this.remotePlayers.forEach((player, id) => {
+            if (player.mesh) {
+                players.push({
+                    position: {
+                        x: player.mesh.position.x,
+                        z: player.mesh.position.z
+                    },
+                    rotation: player.mesh.rotation.y,
+                    color: '#' + player.color.getHexString(),
+                    isLocal: false
+                });
+            }
+        });
+        
+        this.ui.updateMinimap(players);
+    }
+
+    /**
      * Emit particles based on car actions
      */
     _emitCarParticles(actions) {
@@ -573,6 +622,20 @@ export class Game {
                        this.gameState.canPlay;
         const actions = this.localCar.updatePhysics(dt, canMove);
         
+        // Update car to follow track surface
+        if (canMove) {
+            const track = this.sceneManager.getTrack();
+            this.localCar.followTrackSurface(track);
+        }
+        
+        // Update remote players to follow track surface
+        this.remotePlayers.forEach((player) => {
+            if (!player.isDead) {
+                const track = this.sceneManager.getTrack();
+                player.followTrackSurface(track);
+            }
+        });
+        
         // Start sound when game becomes active
         if (this.gameState.isGameActive && !this.soundStarted) {
             this.sound.start();
@@ -624,6 +687,9 @@ export class Game {
         
         // Update leaderboard
         this._updateLeaderboard();
+        
+        // Update minimap
+        this._updateMinimap();
         
         // Render
         this.renderer.render(this.sceneManager.getScene(), this.camera.getCamera());

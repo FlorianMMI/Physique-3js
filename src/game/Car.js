@@ -22,6 +22,15 @@ export class Car {
         this.turnSpeed = Math.PI * 0.5; // Slightly increased from 0.45 for better turning
         this.turnSpeedPenalty = 0.998; // Speed multiplier when turning (99.8% - much less harsh)
         
+        // Track following properties
+        this.trackPitch = 0; // Current pitch from track slope
+        this.trackRoll = 0; // Current roll from track banking
+        this.pitchLerpSpeed = 0.15; // How quickly pitch follows track (increased for smoother)
+        this.rollLerpSpeed = 0.15; // How quickly roll follows track (increased for smoother)
+        this.altitudeLerpSpeed = 0.2; // How quickly altitude follows track
+        this.currentSegmentId = null; // Which track segment the car is currently on
+        this.segmentT = 0; // Position along the current segment (0-1)
+        
         // Boost configuration
         this.boostMultiplier = 2.0;
         this.boostMaxMultiplier = 1.5;
@@ -271,6 +280,46 @@ export class Car {
     }
 
     /**
+     * Update car to follow track surface (altitude and tilt)
+     * Now uses segment-based tracking to support overlapping tracks
+     * @param {Track} track - The track object to follow
+     */
+    followTrackSurface(track) {
+        if (!this.mesh || !track) return;
+
+        // Get track surface information at car's position
+        // Pass current segment to optimize search and handle overlaps
+        const surfaceInfo = track.getTrackSurfaceAt(this.mesh.position, this.currentSegmentId);
+        
+        // Update segment tracking
+        this.currentSegmentId = surfaceInfo.segmentId;
+        this.segmentT = surfaceInfo.t;
+        
+        // Update car's Y position to match track altitude (with offset for car height)
+        const carHeightOffset = 0.3; // Adjust based on your car model
+        const targetY = surfaceInfo.altitude + carHeightOffset;
+        
+        // Smoothly lerp altitude to avoid jumping
+        this.mesh.position.y = THREE.MathUtils.lerp(
+            this.mesh.position.y, 
+            targetY, 
+            this.altitudeLerpSpeed
+        );
+        
+        // Smoothly interpolate pitch and roll
+        this.trackPitch = THREE.MathUtils.lerp(this.trackPitch, surfaceInfo.pitch, this.pitchLerpSpeed);
+        this.trackRoll = THREE.MathUtils.lerp(this.trackRoll, surfaceInfo.roll, this.rollLerpSpeed);
+        
+        // Apply pitch (rotation around X axis - going up/down slopes)
+        this.mesh.rotation.x = this.trackPitch;
+        
+        // Apply roll (rotation around Z axis - banking on turns)
+        // We need to apply this after the yaw rotation
+        const yaw = this.mesh.rotation.y;
+        this.mesh.rotation.set(this.trackPitch, yaw, this.trackRoll, 'YXZ');
+    }
+
+    /**
      * Interpolate remote player position
      */
     interpolate(dt) {
@@ -295,13 +344,31 @@ export class Car {
 
     /**
      * Update target position/rotation for interpolation
+     * Now includes segment tracking for overlapping track support
      */
-    setTarget(x, y, z, rotY, vx, vz) {
+    setTarget(x, y, z, rotY, vx, vz, segmentId, segmentT) {
         this.targetPos.set(x, y, z);
         this.targetRot = rotY;
         if (vx !== undefined && vz !== undefined) {
             this.velocity.set(vx, 0, vz);
         }
+        // Update segment tracking if provided
+        if (segmentId !== undefined) {
+            this.currentSegmentId = segmentId;
+        }
+        if (segmentT !== undefined) {
+            this.segmentT = segmentT;
+        }
+    }
+
+    /**
+     * Get current segment data for network sync
+     */
+    getSegmentData() {
+        return {
+            segmentId: this.currentSegmentId,
+            segmentT: this.segmentT
+        };
     }
 
     /**

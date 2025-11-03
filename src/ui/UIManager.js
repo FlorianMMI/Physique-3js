@@ -6,6 +6,11 @@ export class UIManager {
         this.gameState = gameState;
         this.hud = null;
         this.hudElements = {};
+        this.minimap = null;
+        this.minimapCanvas = null;
+        this.minimapCtx = null;
+        this.trackBounds = null;
+        this.trackSkeletonPoints = null;
         this._createHUD();
     }
 
@@ -81,6 +86,9 @@ export class UIManager {
         
         // Create speedometer
         this._createSpeedometer();
+
+        // Create minimap
+        this._createMinimap();
     }
 
     /**
@@ -399,5 +407,269 @@ export class UIManager {
         this.nowPlayingTimeout = setTimeout(() => {
             this.nowPlaying.classList.remove('show');
         }, 3000);
+    }
+
+    /**
+     * Create minimap UI
+     */
+    _createMinimap() {
+        this.minimap = document.createElement('div');
+        this.minimap.className = 'minimap';
+        this.minimap.innerHTML = `
+            <canvas id="minimap-canvas" width="200" height="200"></canvas>
+        `;
+        document.body.appendChild(this.minimap);
+
+        this.minimapCanvas = document.getElementById('minimap-canvas');
+        this.minimapCtx = this.minimapCanvas.getContext('2d');
+    }
+
+    /**
+     * Initialize minimap with track data
+     * @param {Array} skeletonPoints - Array of THREE.Vector3 points defining the track centerline
+     */
+    initMinimap(skeletonPoints) {
+        if (!skeletonPoints || skeletonPoints.length === 0) return;
+
+        // Calculate track bounds
+        let minX = Infinity, maxX = -Infinity;
+        let minZ = Infinity, maxZ = -Infinity;
+
+        skeletonPoints.forEach(point => {
+            minX = Math.min(minX, point.x);
+            maxX = Math.max(maxX, point.x);
+            minZ = Math.min(minZ, point.z);
+            maxZ = Math.max(maxZ, point.z);
+        });
+
+        // Add padding
+        const padding = 10;
+        minX -= padding;
+        maxX += padding;
+        minZ -= padding;
+        maxZ += padding;
+
+        this.trackBounds = { minX, maxX, minZ, maxZ };
+        
+        // Store skeleton points for later drawing
+        this.trackSkeletonPoints = skeletonPoints;
+
+        // Draw track on minimap
+        this._drawTrack(skeletonPoints);
+    }
+
+    /**
+     * Draw the track on the minimap
+     * @param {Array} skeletonPoints - Track skeleton points
+     */
+    _drawTrack(skeletonPoints) {
+        if (!this.minimapCtx || !this.trackBounds) return;
+
+        const ctx = this.minimapCtx;
+        const canvas = this.minimapCanvas;
+        const bounds = this.trackBounds;
+
+        // Clear canvas with transparency
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+        // Draw track with semi-transparent dark background fill
+        ctx.fillStyle = 'rgba(20, 20, 20, 0.7)';
+        ctx.strokeStyle = '#00ff00';
+        ctx.lineWidth = 10;
+        ctx.lineCap = 'round';
+        ctx.lineJoin = 'round';
+        
+        // Create path for the track
+        ctx.beginPath();
+        skeletonPoints.forEach((point, index) => {
+            const x = this._worldToMinimapX(point.x);
+            const y = this._worldToMinimapY(point.z);
+
+            if (index === 0) {
+                ctx.moveTo(x, y);
+            } else {
+                ctx.lineTo(x, y);
+            }
+        });
+
+        // Close the loop
+        const firstPoint = skeletonPoints[0];
+        ctx.lineTo(
+            this._worldToMinimapX(firstPoint.x),
+            this._worldToMinimapY(firstPoint.z)
+        );
+        
+        ctx.closePath();
+        
+        // Fill the track
+        ctx.fill();
+        
+        // Stroke the track outline
+        ctx.stroke();
+
+        // Draw finish line marker (at first skeleton point)
+        const finishX = this._worldToMinimapX(firstPoint.x);
+        const finishY = this._worldToMinimapY(firstPoint.z);
+        
+        // Finish line glow
+        ctx.shadowColor = 'rgba(0, 255, 0, 0.8)';
+        ctx.shadowBlur = 15;
+        
+        ctx.fillStyle = '#00ff00';
+        ctx.beginPath();
+        ctx.arc(finishX, finishY, 6, 0, Math.PI * 2);
+        ctx.fill();
+        
+        ctx.strokeStyle = '#ffffff';
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.arc(finishX, finishY, 6, 0, Math.PI * 2);
+        ctx.stroke();
+        
+        // Reset shadow
+        ctx.shadowBlur = 0;
+    }
+
+    /**
+     * Update minimap with player positions
+     * @param {Array} players - Array of player objects with position and color
+     */
+    updateMinimap(players) {
+        if (!this.minimapCtx || !this.trackBounds || !this.trackSkeletonPoints) return;
+
+        const ctx = this.minimapCtx;
+        const canvas = this.minimapCanvas;
+        
+        // Clear canvas
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+        // Redraw track using stored skeleton points
+        if (this.trackSkeletonPoints) {
+            const bounds = this.trackBounds;
+            
+            // Draw track with semi-transparent dark background fill
+            ctx.fillStyle = 'rgba(20, 20, 20, 0.7)';
+            ctx.strokeStyle = '#00ff00';
+            ctx.lineWidth = 10;
+            ctx.lineCap = 'round';
+            ctx.lineJoin = 'round';
+            
+            // Create path for the track
+            ctx.beginPath();
+            this.trackSkeletonPoints.forEach((point, index) => {
+                const x = this._worldToMinimapX(point.x);
+                const y = this._worldToMinimapY(point.z);
+
+                if (index === 0) {
+                    ctx.moveTo(x, y);
+                } else {
+                    ctx.lineTo(x, y);
+                }
+            });
+
+            // Close the loop
+            const firstPoint = this.trackSkeletonPoints[0];
+            ctx.lineTo(
+                this._worldToMinimapX(firstPoint.x),
+                this._worldToMinimapY(firstPoint.z)
+            );
+            
+            ctx.closePath();
+            
+            // Fill the track
+            ctx.fill();
+            
+            // Stroke the track outline
+            ctx.stroke();
+
+            // Draw finish line marker (at first skeleton point)
+            const finishX = this._worldToMinimapX(firstPoint.x);
+            const finishY = this._worldToMinimapY(firstPoint.z);
+            
+            // Finish line glow
+            ctx.shadowColor = 'rgba(0, 255, 0, 0.8)';
+            ctx.shadowBlur = 15;
+            
+            ctx.fillStyle = '#00ff00';
+            ctx.beginPath();
+            ctx.arc(finishX, finishY, 6, 0, Math.PI * 2);
+            ctx.fill();
+            
+            ctx.strokeStyle = '#ffffff';
+            ctx.lineWidth = 2;
+            ctx.beginPath();
+            ctx.arc(finishX, finishY, 6, 0, Math.PI * 2);
+            ctx.stroke();
+            
+            // Reset shadow
+            ctx.shadowBlur = 0;
+        }
+
+        // Draw players
+        players.forEach(player => {
+            if (!player.position) return;
+
+            const x = this._worldToMinimapX(player.position.x);
+            const y = this._worldToMinimapY(player.position.z);
+
+            // Draw player glow
+            ctx.shadowColor = player.color || '#ffffff';
+            ctx.shadowBlur = 10;
+
+            // Draw player dot
+            ctx.fillStyle = player.color || '#ffffff';
+            ctx.beginPath();
+            ctx.arc(x, y, player.isLocal ? 6 : 5, 0, Math.PI * 2);
+            ctx.fill();
+
+            // Reset shadow
+            ctx.shadowBlur = 0;
+
+            // Draw white outline
+            ctx.strokeStyle = '#ffffff';
+            ctx.lineWidth = player.isLocal ? 2 : 1.5;
+            ctx.beginPath();
+            ctx.arc(x, y, player.isLocal ? 6 : 5, 0, Math.PI * 2);
+            ctx.stroke();
+
+            // Draw direction indicator for local player
+            if (player.isLocal && player.rotation !== undefined) {
+                const dirLength = 10;
+                const dirX = x + Math.sin(player.rotation) * dirLength;
+                const dirY = y - Math.cos(player.rotation) * dirLength;
+
+                ctx.strokeStyle = player.color || '#ffffff';
+                ctx.lineWidth = 2.5;
+                ctx.beginPath();
+                ctx.moveTo(x, y);
+                ctx.lineTo(dirX, dirY);
+                ctx.stroke();
+            }
+        });
+    }
+
+    /**
+     * Convert world X coordinate to minimap X coordinate
+     */
+    _worldToMinimapX(worldX) {
+        const bounds = this.trackBounds;
+        const canvas = this.minimapCanvas;
+        const padding = 10;
+        
+        const normalized = (worldX - bounds.minX) / (bounds.maxX - bounds.minX);
+        return padding + normalized * (canvas.width - padding * 2);
+    }
+
+    /**
+     * Convert world Z coordinate to minimap Y coordinate (inverted)
+     */
+    _worldToMinimapY(worldZ) {
+        const bounds = this.trackBounds;
+        const canvas = this.minimapCanvas;
+        const padding = 10;
+        
+        const normalized = (worldZ - bounds.minZ) / (bounds.maxZ - bounds.minZ);
+        // Invert Y axis for canvas
+        return canvas.height - (padding + normalized * (canvas.height - padding * 2));
     }
 }

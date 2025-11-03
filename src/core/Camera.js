@@ -102,10 +102,17 @@ export class CameraManager {
             this.dynamicConfig.distanceLerpSpeed
         );
 
-        // Calculate roll based on angular velocity (turning)
+        // Calculate roll based on angular velocity (turning) AND track roll
         // Clamp angular velocity to ensure it's within -1 to 1
         const clampedAngularVelocity = THREE.MathUtils.clamp(angularVelocity, -1, 1);
-        this.targetRoll = -clampedAngularVelocity * this.rollConfig.maxRollAngle;
+        const turningRoll = -clampedAngularVelocity * this.rollConfig.maxRollAngle;
+        
+        // Get track roll from car's rotation (if car has track roll applied)
+        const carRoll = targetMesh.rotation.z || 0;
+        
+        // Combine turning roll and track roll
+        this.targetRoll = turningRoll + carRoll * 0.5; // Use 50% of car's track roll for subtler effect
+        
         this.currentRoll = THREE.MathUtils.lerp(
             this.currentRoll,
             this.targetRoll,
@@ -113,10 +120,11 @@ export class CameraManager {
         );
         
         // Clamp current roll to max angle to prevent extreme rolls
+        const maxTotalRoll = this.rollConfig.maxRollAngle * 1.5; // Allow slightly more roll when combined
         this.currentRoll = THREE.MathUtils.clamp(
             this.currentRoll,
-            -this.rollConfig.maxRollAngle,
-            this.rollConfig.maxRollAngle
+            -maxTotalRoll,
+            maxTotalRoll
         );
 
         // Apply tilt decay

@@ -100,6 +100,9 @@ export class NetworkClient {
             const vx = forwardVec.x * car.speed * 0.1;
             const vz = forwardVec.z * car.speed * 0.1;
             
+            // Get segment data for overlapping track support
+            const segmentData = car.getSegmentData();
+            
             const obj = {
                 type: 'state',
                 x: pos.x,
@@ -109,7 +112,9 @@ export class NetworkClient {
                 vx,
                 vz,
                 lives: car.lives,
-                lap: car.currentLap
+                lap: car.currentLap,
+                segmentId: segmentData.segmentId,
+                segmentT: segmentData.segmentT
             };
             
             this.socket.send(JSON.stringify(obj));
